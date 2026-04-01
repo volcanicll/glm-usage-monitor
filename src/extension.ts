@@ -1,14 +1,147 @@
 import * as vscode from 'vscode';
+import { AuthService } from './services/AuthService';
+import { GLMUsageService } from './services/GLMUsageService';
+import { StatusBarManager } from './services/StatusBarManager';
+import { WebViewProvider } from './views/WebViewProvider';
+import { CombinedUsageData } from './types/api';
+
+let refreshTimer: NodeJS.Timeout | undefined;
+let statusBarManager: StatusBarManager;
+let webViewProvider: WebViewProvider;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('GLM Usage Monitor extension is now active!');
 
-    // TODO: Temporary scaffolding command for testing (Task 11 will implement full commands: refresh, openMonitor, configure, clearCredentials)
-    const disposable = vscode.commands.registerCommand('glmUsage.hello', () => {
-        vscode.window.showInformationMessage('Hello from GLM Usage Monitor!');
+    const config = vscode.workspace.getConfiguration('glmUsage');
+    const authService = new AuthService(context.secrets, config);
+
+    statusBarManager = new StatusBarManager();
+
+    // Create event emitter for data changes
+    const onDidChangeData = new vscode.EventEmitter<CombinedUsageData | null>();
+
+    // Register WebView provider
+    webViewProvider = new WebViewProvider(
+        context.extensionUri,
+        onDidChangeData.event
+    );
+
+    vscode.window.registerWebviewViewProvider(
+        WebViewProvider.viewType,
+        webViewProvider
+    );
+
+    // Refresh command
+    const refreshCommand = vscode.commands.registerCommand('glmUsage.refresh', async () => {
+        await refreshUsage(authService);
     });
 
-    context.subscriptions.push(disposable);
+    // Open monitor command
+    const openMonitorCommand = vscode.commands.registerCommand('glmUsage.openMonitor', () => {
+        vscode.commands.executeCommand('glmUsage.monitor.focus');
+    });
+
+    // Configure command
+    const configureCommand = vscode.commands.registerCommand('glmUsage.configure', async () => {
+        await showConfigurationDialog(authService);
+    });
+
+    // Clear credentials command
+    const clearCredentialsCommand = vscode.commands.registerCommand('glmUsage.clearCredentials', async () => {
+        await authService.clearCredentials();
+        vscode.window.showInformationMessage('Credentials cleared. Please reload VS Code.');
+    });
+
+    // Register all disposables
+    context.subscriptions.push(
+        refreshCommand,
+        openMonitorCommand,
+        configureCommand,
+        clearCredentialsCommand,
+        statusBarManager,
+        onDidChangeData
+    );
+
+    // Initial refresh and setup auto-refresh
+    scheduleRefresh(authService, config);
 }
 
-export function deactivate() {}
+async function refreshUsage(authService: AuthService): Promise<void> {
+    statusBarManager.showLoading();
+    webViewProvider.sendLoading();
+
+    try {
+        const creds = await authService.getCredentials();
+        if (!creds) {
+            throw new Error('No credentials configured. Please run "GLM Usage: Configure" command.');
+        }
+
+        const service = new GLMUsageService(creds);
+        const data = await service.fetchAllUsage();
+
+        const combinedData: CombinedUsageData = {
+            quotaLimits: data.quotaLimits.limits,
+            modelUsage: data.modelUsage.data,
+            toolUsage: data.toolUsage.data,
+            timestamp: new Date().toISOString()
+        };
+
+        const summary = service.parseQuotaSummary(data.quotaLimits);
+        statusBarManager.update(summary);
+        webViewProvider.sendData(combinedData);
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        statusBarManager.showError(errorMessage);
+        webViewProvider.sendError(errorMessage);
+    }
+}
+
+function scheduleRefresh(authService: AuthService, config: vscode.WorkspaceConfiguration): void {
+    const interval = config.get<number>('refreshInterval', 600000);
+    const autoRefresh = config.get<boolean>('autoRefresh', true);
+
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+    }
+
+    if (autoRefresh) {
+        refreshTimer = setInterval(() => {
+            refreshUsage(authService);
+        }, interval);
+    }
+
+    // Initial refresh
+    refreshUsage(authService);
+}
+
+async function showConfigurationDialog(authService: AuthService): Promise<void> {
+    const authToken = await vscode.window.showInputBox({
+        prompt: 'Enter your GLM API Auth Token',
+        password: true,
+        ignoreFocusOut: true
+    });
+
+    if (!authToken) {
+        return;
+    }
+
+    const baseUrl = await vscode.window.showInputBox({
+        prompt: 'Enter your GLM API Base URL',
+        value: 'https://api.z.ai/api/anthropic',
+        ignoreFocusOut: true
+    });
+
+    if (!baseUrl) {
+        return;
+    }
+
+    await authService.storeCredentials(authToken, baseUrl);
+    vscode.window.showInformationMessage('Credentials saved successfully!');
+}
+
+export function deactivate() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+    }
+}
