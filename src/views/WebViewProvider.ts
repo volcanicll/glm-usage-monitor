@@ -5,6 +5,7 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'glmUsage.monitor';
 
     private _view?: vscode.WebviewView;
+    private setupMode = false;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -32,6 +33,10 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
                     case 'refresh':
                         // Trigger refresh - will be handled by extension
                         vscode.commands.executeCommand('glmUsage.refresh');
+                        break;
+                    case 'saveCredentials':
+                        // Handle saving credentials from setup screen
+                        vscode.commands.executeCommand('glmUsage.storeCredentials', message.authToken, message.baseUrl);
                         break;
                     }
                 },
@@ -74,7 +79,20 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /**
+     * Set setup mode to show welcome screen
+     */
+    public setSetupMode(enabled: boolean): void {
+        this.setupMode = enabled;
+        if (this._view) {
+            this._view.webview.html = this._getHtmlForWebview(this._view.webview);
+        }
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview): string {
+        if (this.setupMode) {
+            return this._getSetupHtml(webview);
+        }
         const nonce = this.getNonce();
 
         return `<!DOCTYPE html>
@@ -161,5 +179,63 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
             text += possible.charAt(Math.floor(Math.random() * possible.length));
         }
         return text;
+    }
+
+    private _getSetupHtml(webview: vscode.Webview): string {
+        const nonce = this.getNonce();
+
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
+    <title>GLM Usage Monitor - Setup</title>
+    <link rel="stylesheet" href="${webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'styles.css'))}">
+</head>
+<body>
+    <div class="setup-container">
+        <h1>Welcome to GLM Usage Monitor!</h1>
+        <p>To get started, please enter your GLM API credentials.</p>
+
+        <form id="setup-form" class="setup-form">
+            <div class="form-group">
+                <label for="auth-token">Auth Token</label>
+                <input
+                    type="password"
+                    id="auth-token"
+                    name="auth-token"
+                    placeholder="Enter your GLM API auth token"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="base-url">Base URL</label>
+                <input
+                    type="url"
+                    id="base-url"
+                    name="base-url"
+                    value="https://api.z.ai/api/anthropic"
+                    placeholder="Enter your GLM API base URL"
+                    required
+                >
+            </div>
+
+            <button type="submit" class="primary-button">Get Started</button>
+        </form>
+
+        <div class="setup-hint">
+            <strong>Where to find your credentials:</strong>
+            <code>1. Visit your GLM platform dashboard
+2. Navigate to API settings
+3. Copy your auth token
+4. Use the base URL provided by your platform</code>
+        </div>
+    </div>
+
+    <script nonce="${nonce}" src="${webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'setup.js'))}"></script>
+</body>
+</html>`;
     }
 }

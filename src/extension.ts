@@ -8,12 +8,13 @@ import { CombinedUsageData } from './types/api';
 let refreshTimer: NodeJS.Timeout | undefined;
 let statusBarManager: StatusBarManager;
 let webViewProvider: WebViewProvider;
+let authService: AuthService;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
     console.log('GLM Usage Monitor extension is now active!');
 
     const config = vscode.workspace.getConfiguration('glmUsage');
-    const authService = new AuthService(context.secrets, config);
+    authService = new AuthService(context.secrets, config);
 
     statusBarManager = new StatusBarManager();
 
@@ -30,6 +31,12 @@ export function activate(context: vscode.ExtensionContext) {
         WebViewProvider.viewType,
         webViewProvider
     );
+
+    // Check if credentials exist, if not show setup screen
+    const credentials = await authService.getCredentials();
+    if (!credentials) {
+        webViewProvider.setSetupMode(true);
+    }
 
     // Refresh command
     const refreshCommand = vscode.commands.registerCommand('glmUsage.refresh', async () => {
@@ -52,15 +59,51 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Credentials cleared. Please reload VS Code.');
     });
 
+    // Store credentials command (used by setup screen)
+    const storeCredentialsCommand = vscode.commands.registerCommand('glmUsage.storeCredentials', async (authToken: string, baseUrl: string) => {
+        await authService.storeCredentials(authToken, baseUrl);
+        vscode.window.showInformationMessage('Credentials saved successfully!');
+        webViewProvider.setSetupMode(false);
+        await refreshUsage(authService);
+    });
+
     // Register all disposables
     context.subscriptions.push(
         refreshCommand,
         openMonitorCommand,
         configureCommand,
         clearCredentialsCommand,
+        storeCredentialsCommand,
         statusBarManager,
         onDidChangeData
     );
+
+    // Configuration change listener (Task 13)
+    const configChangeListener = vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('glmUsage')) {
+            const newConfig = vscode.workspace.getConfiguration('glmUsage');
+            scheduleRefresh(authService, newConfig);
+        }
+    });
+    context.subscriptions.push(configChangeListener);
+
+    // Window focus handler (Task 14)
+    const focusHandler = vscode.window.onDidChangeWindowState(state => {
+        const config = vscode.workspace.getConfiguration('glmUsage');
+        const autoRefresh = config.get<boolean>('autoRefresh', true);
+
+        if (autoRefresh) {
+            if (state.focused) {
+                scheduleRefresh(authService, config);
+            } else {
+                if (refreshTimer) {
+                    clearInterval(refreshTimer);
+                    refreshTimer = undefined;
+                }
+            }
+        }
+    });
+    context.subscriptions.push(focusHandler);
 
     // Initial refresh and setup auto-refresh
     scheduleRefresh(authService, config);
