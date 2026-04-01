@@ -24,16 +24,23 @@ function showLoading() {
 function updateData(data) {
     document.querySelector('.container').classList.remove('loading');
 
+    // Remove any existing error message
+    const existingError = document.querySelector('.error-message');
+    if (existingError) {
+        existingError.remove();
+    }
+
     // Update gauges
     const tokenSummary = extractTokenSummary(data.quotaLimits);
     const mcpSummary = extractMcpSummary(data.quotaLimits);
     updateGauges(tokenSummary.percentage, mcpSummary.percentage);
 
     // Update trend chart
-    updateTrendChart(data.modelUsage || []);
+    const modelData = data.modelUsage?.data || data.modelUsage || [];
+    updateTrendChart(modelData);
 
     // Update breakdown table
-    updateBreakdownTable(data.modelUsage || []);
+    updateBreakdownTable(modelData);
 
     // Update timestamp
     updateTimestamp(data.timestamp);
@@ -43,22 +50,27 @@ function updateData(data) {
 function showError(errorMessage) {
     document.querySelector('.container').classList.remove('loading');
 
-    let errorDiv = document.querySelector('.error-message');
-    if (!errorDiv) {
-        errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        document.querySelector('.container').prepend(errorDiv);
+    // Remove any existing error message first
+    const existingError = document.querySelector('.error-message');
+    if (existingError) {
+        existingError.remove();
     }
 
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
     errorDiv.innerHTML = `
         <p>${errorMessage}</p>
         <button onclick="retryFetch()">Retry</button>
     `;
+    document.querySelector('.container').prepend(errorDiv);
 }
 
 // Extract token summary from quota limits
-function extractTokenSummary(limits) {
-    const tokenLimit = limits.limits?.find(l => l.type === 'TOKENS_LIMIT');
+function extractTokenSummary(quotaResponse) {
+    const limits = quotaResponse.limits || quotaResponse;
+    const tokenLimit = Array.isArray(limits)
+        ? limits.find(l => l.type === 'TOKENS_LIMIT')
+        : limits;
     return {
         percentage: tokenLimit?.percentage || 0,
         used: parseInt(tokenLimit?.currentValue || '0'),
@@ -67,8 +79,11 @@ function extractTokenSummary(limits) {
 }
 
 // Extract MCP summary from quota limits
-function extractMcpSummary(limits) {
-    const mcpLimit = limits.limits?.find(l => l.type === 'TIME_LIMIT');
+function extractMcpSummary(quotaResponse) {
+    const limits = quotaResponse.limits || quotaResponse;
+    const mcpLimit = Array.isArray(limits)
+        ? limits.find(l => l.type === 'TIME_LIMIT')
+        : limits;
     return {
         percentage: mcpLimit?.percentage || 0,
         used: parseInt(mcpLimit?.currentValue || '0'),

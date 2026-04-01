@@ -80,8 +80,18 @@ function initTrendChart() {
 
 // Update gauges with new data
 function updateGauges(tokenPercent, mcpPercent) {
+    if (!tokenGauge || !mcpGauge) {
+        console.warn('Charts not initialized yet');
+        return;
+    }
+
     const tokenLabel = document.getElementById('token-percentage');
     const mcpLabel = document.getElementById('mcp-percentage');
+
+    if (!tokenLabel || !mcpLabel) {
+        console.warn('Gauge labels not found');
+        return;
+    }
 
     tokenLabel.textContent = tokenPercent;
     mcpLabel.textContent = mcpPercent;
@@ -104,6 +114,11 @@ function updateGauges(tokenPercent, mcpPercent) {
 
 // Update trend chart with usage data
 function updateTrendChart(usageData) {
+    if (!trendChart || !Array.isArray(usageData) || usageData.length === 0) {
+        console.warn('Trend chart not ready or no data');
+        return;
+    }
+
     const labels = usageData.map(d => {
         const date = new Date(d.timestamp);
         return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -156,4 +171,11 @@ function formatTokens(tokens) {
 }
 
 // Initialize on load
-document.addEventListener('DOMContentLoaded', initCharts);
+document.addEventListener('DOMContentLoaded', () => {
+    // Check if Chart is loaded
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js is not loaded');
+        return;
+    }
+    initCharts();
+});

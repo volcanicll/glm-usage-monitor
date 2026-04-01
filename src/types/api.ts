@@ -26,9 +26,9 @@ export interface UsageData {
 
 /** Combined usage data for UI */
 export interface CombinedUsageData {
-    quotaLimits: QuotaLimit[];
-    modelUsage: UsageData[];
-    toolUsage: UsageData[];
+    quotaLimits: QuotaLimitResponse;
+    modelUsage: UsageResponse;
+    toolUsage: UsageResponse;
     timestamp: string;
 }
 

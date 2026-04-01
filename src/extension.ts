@@ -123,9 +123,9 @@ async function refreshUsage(authService: AuthService): Promise<void> {
         const data = await service.fetchAllUsage();
 
         const combinedData: CombinedUsageData = {
-            quotaLimits: data.quotaLimits.limits,
-            modelUsage: data.modelUsage.data,
-            toolUsage: data.toolUsage.data,
+            quotaLimits: data.quotaLimits,
+            modelUsage: data.modelUsage,
+            toolUsage: data.toolUsage,
             timestamp: new Date().toISOString()
         };
 
