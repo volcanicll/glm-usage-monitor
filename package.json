@@ -1,0 +1,96 @@
+{
+  "name": "glm-usage-monitor",
+  "displayName": "GLM Usage Monitor",
+  "description": "Monitor your GLM Coding Plan usage in VS Code",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "glmUsage.refresh",
+        "title": "Refresh GLM Usage",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "glmUsage.openMonitor",
+        "title": "Open GLM Usage Monitor",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "glmUsage.configure",
+        "title": "Configure GLM Usage Monitor",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "glmUsage.clearCredentials",
+        "title": "Clear GLM API Credentials",
+        "icon": "$(discard)"
+      }
+    ],
+    "configuration": {
+      "title": "GLM Usage Monitor",
+      "properties": {
+        "glmUsage.baseUrl": {
+          "type": "string",
+          "default": "https://api.z.ai/api/anthropic",
+          "description": "The base URL for the GLM API"
+        },
+        "glmUsage.refreshInterval": {
+          "type": "number",
+          "default": 600000,
+          "description": "Auto-refresh interval in milliseconds (default: 10 minutes)"
+        },
+        "glmUsage.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh usage data"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "glmUsageContainer",
+          "title": "GLM Usage",
+          "icon": "$(graph)"
+        }
+      ]
+    },
+    "views": {
+      "glmUsageContainer": [
+        {
+          "id": "glmUsage.monitor",
+          "name": "Usage Monitor",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.0",
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.0"
+  }
+}
