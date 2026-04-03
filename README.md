@@ -68,7 +68,7 @@ MIT License - see [LICENSE](LICENSE) for details
 
 ## Support
 
-For issues, feature requests, or questions, please visit the [GitHub repository](https://github.com/yourusername/glm-usage-monitor)
+For issues, feature requests, or questions, please visit the [GitHub repository](https://github.com/volcanicll/glm-usage-monitor)
 
 ## Changelog
 
