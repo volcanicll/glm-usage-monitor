@@ -3,16 +3,16 @@
   "displayName": "GLM Usage Monitor",
   "description": "Monitor your GLM Coding Plan usage in VS Code",
   "version": "0.0.1",
-  "publisher": "YOUR_PUBLISHER_NAME",
+  "publisher": "volcanic",
   "icon": "resources/icon-256.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/glm-usage-monitor.git"
+    "url": "https://github.com/volcanicll/glm-usage-monitor.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/glm-usage-monitor/issues"
+    "url": "https://github.com/volcanicll/glm-usage-monitor/issues"
   },
-  "homepage": "https://github.com/yourusername/glm-usage-monitor#readme",
+  "homepage": "https://github.com/volcanicll/glm-usage-monitor#readme",
   "license": "MIT",
   "keywords": [
     "glm",
