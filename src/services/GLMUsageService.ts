@@ -1,4 +1,5 @@
-import * as https from 'https';
+import * as https from "https";
+import { CacheService } from "../core/CacheService";
 import {
   ApiConfig,
   DetailedUsageSnapshot,
@@ -10,15 +11,23 @@ import {
   UsageMetricSummary,
   UsageRange,
   UsageResponse,
-} from '../types/api';
+} from "../types/api";
 import {
   getNextMonthlyResetTime,
   getTimeWindowParams,
   getUsageRangeLabel,
-} from '../util/timeWindow';
+} from "../util/timeWindow";
 
 export class GLMUsageService {
-  constructor(private config: ApiConfig) {}
+  private cache: CacheService;
+
+  constructor(
+    private config: ApiConfig,
+    cache?: CacheService,
+    private cacheEnabled: boolean = true,
+  ) {
+    this.cache = cache ?? new CacheService();
+  }
 
   /**
    * Fetch all usage data
@@ -28,7 +37,7 @@ export class GLMUsageService {
     modelUsage: UsageResponse;
     toolUsage: UsageResponse;
   }> {
-    return this.fetchUsageByRange('today');
+    return this.fetchUsageByRange("today");
   }
 
   async fetchUsageByRange(range: UsageRange): Promise<{
@@ -46,27 +55,83 @@ export class GLMUsageService {
   }
 
   /**
-   * Fetch quota limits
+   * Fetch quota limits with optional caching
    */
-  async fetchQuotaLimits(): Promise<QuotaLimitResponse> {
-    const url = this.getQuotaLimitUrl();
-    return this.makeRequest<QuotaLimitResponse>(url);
+  async fetchQuotaLimits(forceRefresh = false): Promise<QuotaLimitResponse> {
+    if (!this.cacheEnabled || forceRefresh) {
+      const url = this.getQuotaLimitUrl();
+      return this.makeRequest<QuotaLimitResponse>(url);
+    }
+
+    const cacheKey = `quota_limits`;
+    return this.cache.getOrSet<QuotaLimitResponse>(
+      cacheKey,
+      () => this.makeRequest<QuotaLimitResponse>(this.getQuotaLimitUrl()),
+      2 * 60 * 1000, // 2 minutes TTL for quota limits
+    );
   }
 
   /**
-   * Fetch model usage with time window
+   * Fetch model usage with time window and optional caching
    */
-  async fetchModelUsage(range: UsageRange = 'today'): Promise<UsageResponse> {
-    const url = this.getModelUsageUrl(range);
-    return this.makeRequest<UsageResponse>(url);
+  async fetchModelUsage(
+    range: UsageRange = "today",
+    forceRefresh = false,
+  ): Promise<UsageResponse> {
+    if (!this.cacheEnabled || forceRefresh) {
+      const url = this.getModelUsageUrl(range);
+      return this.makeRequest<UsageResponse>(url);
+    }
+
+    const cacheKey = `model_usage_${range}`;
+    return this.cache.getOrSet<UsageResponse>(
+      cacheKey,
+      () => this.makeRequest<UsageResponse>(this.getModelUsageUrl(range)),
+      this.getCacheTTLForRange(range),
+    );
   }
 
   /**
-   * Fetch tool usage with time window
+   * Fetch tool usage with time window and optional caching
    */
-  async fetchToolUsage(range: UsageRange = 'today'): Promise<UsageResponse> {
-    const url = this.getToolUsageUrl(range);
-    return this.makeRequest<UsageResponse>(url);
+  async fetchToolUsage(
+    range: UsageRange = "today",
+    forceRefresh = false,
+  ): Promise<UsageResponse> {
+    if (!this.cacheEnabled || forceRefresh) {
+      const url = this.getToolUsageUrl(range);
+      return this.makeRequest<UsageResponse>(url);
+    }
+
+    const cacheKey = `tool_usage_${range}`;
+    return this.cache.getOrSet<UsageResponse>(
+      cacheKey,
+      () => this.makeRequest<UsageResponse>(this.getToolUsageUrl(range)),
+      this.getCacheTTLForRange(range),
+    );
+  }
+
+  /**
+   * Clear all cached data
+   */
+  clearCache(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * Get cache TTL based on time range
+   */
+  private getCacheTTLForRange(range: UsageRange): number {
+    switch (range) {
+      case "today":
+        return 5 * 60 * 1000; // 5 minutes
+      case "last7Days":
+        return 15 * 60 * 1000; // 15 minutes
+      case "last30Days":
+        return 30 * 60 * 1000; // 30 minutes
+      default:
+        return 5 * 60 * 1000;
+    }
   }
 
   /**
@@ -79,10 +144,10 @@ export class GLMUsageService {
   private getMonitorBaseUrl(): string {
     const parsedBaseUrl = new URL(this.config.baseUrl);
     const hostname = parsedBaseUrl.hostname;
-    const isZai = hostname.includes('api.z.ai');
+    const isZai = hostname.includes("api.z.ai");
     const isZhipu =
-      hostname.includes('open.bigmodel.cn') ||
-      hostname.includes('dev.bigmodel.cn');
+      hostname.includes("open.bigmodel.cn") ||
+      hostname.includes("dev.bigmodel.cn");
 
     if (!isZai && !isZhipu) {
       throw new Error(
@@ -173,7 +238,7 @@ export class GLMUsageService {
 
       req.setTimeout(10000, () => {
         req.destroy();
-        reject(new Error('Request timeout after 10 seconds'));
+        reject(new Error("Request timeout after 10 seconds"));
       });
 
       req.end();
@@ -213,9 +278,9 @@ export class GLMUsageService {
 
     // Handle wrapped response structure: { code: 200, data: { totalUsage: {...} } }
     let actualData: ModelUsageData | undefined;
-    if (typeof modelUsage.data === 'object') {
+    if (typeof modelUsage.data === "object") {
       const wrapper = modelUsage.data as Record<string, unknown>;
-      if (wrapper.totalUsage && typeof wrapper.totalUsage === 'object') {
+      if (wrapper.totalUsage && typeof wrapper.totalUsage === "object") {
         actualData = wrapper as unknown as ModelUsageData;
       }
     }
@@ -226,16 +291,18 @@ export class GLMUsageService {
   /**
    * Extract MCP tool calls from tool usage response
    */
-  private extractMcpToolCalls(toolUsage: UsageResponse): QuotaSummary['mcpToolCalls'] {
+  private extractMcpToolCalls(
+    toolUsage: UsageResponse,
+  ): QuotaSummary["mcpToolCalls"] {
     if (!toolUsage || !toolUsage.data) {
       return undefined;
     }
 
     // Handle wrapped response structure: { code: 200, data: { totalUsage: {...} } }
     let actualData: ToolUsageData | undefined;
-    if (typeof toolUsage.data === 'object') {
+    if (typeof toolUsage.data === "object") {
       const wrapper = toolUsage.data as Record<string, unknown>;
-      if (wrapper.totalUsage && typeof wrapper.totalUsage === 'object') {
+      if (wrapper.totalUsage && typeof wrapper.totalUsage === "object") {
         actualData = wrapper as unknown as ToolUsageData;
       }
     }
@@ -262,9 +329,9 @@ export class GLMUsageService {
   parseQuotaSummary(response: unknown): QuotaSummary {
     // Handle wrapped response structure: { code: 200, data: { limits: [...] } }
     let actualResponse: QuotaLimitResponse;
-    if (response && typeof response === 'object') {
+    if (response && typeof response === "object") {
       const wrapper = response as Record<string, unknown>;
-      if (wrapper.data && typeof wrapper.data === 'object') {
+      if (wrapper.data && typeof wrapper.data === "object") {
         actualResponse = wrapper.data as QuotaLimitResponse;
       } else {
         actualResponse = response as QuotaLimitResponse;
@@ -277,7 +344,11 @@ export class GLMUsageService {
       };
     }
 
-    if (!actualResponse || !actualResponse.limits || !Array.isArray(actualResponse.limits)) {
+    if (
+      !actualResponse ||
+      !actualResponse.limits ||
+      !Array.isArray(actualResponse.limits)
+    ) {
       return {
         tokenUsage: { percentage: 0, used: 0, total: 0 },
         mcpUsage: { percentage: 0, used: 0, total: 0 },
@@ -314,8 +385,9 @@ export class GLMUsageService {
       mcpUsed = currentValue;
     }
 
-    // 提取重置时间（优先使用 TIME_LIMIT 的 nextResetTime，因为它是月度重置）
-    const monthlyResetAt = this.extractMonthlyResetTime(tokenLimit, timeLimit);
+    // 提取重置时间：Token 是小时级重置，MCP 是月度重置
+    const tokenResetAt = this.extractTokenResetTime(tokenLimit);
+    const mcpResetAt = this.extractMcpResetTime(timeLimit);
 
     return {
       tokenUsage: {
@@ -328,7 +400,9 @@ export class GLMUsageService {
         used: Math.max(0, mcpUsed),
         total: Math.max(0, mcpTotal),
       },
-      monthlyResetAt: monthlyResetAt,
+      tokenResetAt,
+      mcpResetAt,
+      monthlyResetAt: mcpResetAt, // Keep for backward compatibility
     };
   }
 
@@ -340,21 +414,21 @@ export class GLMUsageService {
       range,
       rangeLabel: getUsageRangeLabel(range),
       summary,
-      modelUsage: this.aggregateUsage(data.modelUsage, 'model'),
-      toolUsage: this.aggregateUsage(data.toolUsage, 'tool'),
+      modelUsage: this.aggregateUsage(data.modelUsage, "model"),
+      toolUsage: this.aggregateUsage(data.toolUsage, "tool"),
       fetchedAt: new Date().toISOString(),
     };
   }
 
   private aggregateUsage(
     response: UsageResponse,
-    field: 'model' | 'tool',
+    field: "model" | "tool",
   ): UsageMetricSummary[] {
     const usageMap = new Map<string, UsageMetricSummary>();
     const entries = this.normalizeUsageEntries(response?.data);
 
     for (const item of entries) {
-      const name = (field === 'model' ? item.model : item.tool) || 'Unknown';
+      const name = (field === "model" ? item.model : item.tool) || "Unknown";
       const current = usageMap.get(name) ?? { name, tokens: 0, requests: 0 };
       current.tokens += item.tokens ?? 0;
       current.requests += item.requests ?? 0;
@@ -379,6 +453,40 @@ export class GLMUsageService {
       const extracted = this.findResetTime(limit);
       if (extracted) {
         return extracted;
+      }
+    }
+
+    return getNextMonthlyResetTime();
+  }
+
+  /**
+   * Extract Token reset time (hourly reset)
+   */
+  private extractTokenResetTime(tokenLimit: QuotaLimit | undefined): string {
+    if (tokenLimit?.nextResetTime) {
+      const timestamp = this.toNumber(tokenLimit.nextResetTime);
+      if (timestamp > 0) {
+        const date = new Date(timestamp);
+        if (!Number.isNaN(date.getTime())) {
+          return date.toISOString();
+        }
+      }
+    }
+
+    return getNextMonthlyResetTime();
+  }
+
+  /**
+   * Extract MCP reset time (monthly reset)
+   */
+  private extractMcpResetTime(timeLimit: QuotaLimit | undefined): string {
+    if (timeLimit?.nextResetTime) {
+      const timestamp = this.toNumber(timeLimit.nextResetTime);
+      if (timestamp > 0) {
+        const date = new Date(timestamp);
+        if (!Number.isNaN(date.getTime())) {
+          return date.toISOString();
+        }
       }
     }
 
@@ -431,7 +539,7 @@ export class GLMUsageService {
     }
 
     const details = limit.usageDetails;
-    if (!details || typeof details !== 'object') {
+    if (!details || typeof details !== "object") {
       return null;
     }
 
@@ -441,13 +549,13 @@ export class GLMUsageService {
     }
 
     const candidateKeys = [
-      'resetAt',
-      'resetTime',
-      'resetDate',
-      'nextResetAt',
-      'monthlyResetAt',
-      'expireAt',
-      'expiresAt',
+      "resetAt",
+      "resetTime",
+      "resetDate",
+      "nextResetAt",
+      "monthlyResetAt",
+      "expireAt",
+      "expiresAt",
     ];
 
     for (const key of candidateKeys) {
@@ -469,7 +577,7 @@ export class GLMUsageService {
   }
 
   private normalizeDateValue(value: unknown): string | null {
-    if (typeof value === 'string' || typeof value === 'number') {
+    if (typeof value === "string" || typeof value === "number") {
       const date = new Date(value);
       if (!Number.isNaN(date.getTime())) {
         return date.toISOString();
@@ -500,7 +608,7 @@ export class GLMUsageService {
       return;
     }
 
-    if (typeof input !== 'object') {
+    if (typeof input !== "object") {
       return;
     }
 
@@ -517,14 +625,14 @@ export class GLMUsageService {
   private isUsageItem(value: object): boolean {
     const candidate = value as Record<string, unknown>;
     const hasMetric =
-      typeof candidate.tokens === 'number' ||
-      typeof candidate.tokens === 'string' ||
-      typeof candidate.requests === 'number' ||
-      typeof candidate.requests === 'string';
+      typeof candidate.tokens === "number" ||
+      typeof candidate.tokens === "string" ||
+      typeof candidate.requests === "number" ||
+      typeof candidate.requests === "string";
     const hasName =
-      typeof candidate.model === 'string' ||
-      typeof candidate.tool === 'string' ||
-      typeof candidate.name === 'string';
+      typeof candidate.model === "string" ||
+      typeof candidate.tool === "string" ||
+      typeof candidate.name === "string";
 
     return hasMetric || hasName;
   }
@@ -532,30 +640,24 @@ export class GLMUsageService {
   private toUsageItem(value: object): UsageResponseItem {
     const candidate = value as Record<string, unknown>;
     const name =
-      typeof candidate.name === 'string' ? candidate.name : undefined;
+      typeof candidate.name === "string" ? candidate.name : undefined;
 
     return {
       timestamp:
-        typeof candidate.timestamp === 'string' ? candidate.timestamp : '',
-      model:
-        typeof candidate.model === 'string'
-          ? candidate.model
-          : name,
-      tool:
-        typeof candidate.tool === 'string'
-          ? candidate.tool
-          : name,
+        typeof candidate.timestamp === "string" ? candidate.timestamp : "",
+      model: typeof candidate.model === "string" ? candidate.model : name,
+      tool: typeof candidate.tool === "string" ? candidate.tool : name,
       tokens: this.toNumber(candidate.tokens),
       requests: this.toNumber(candidate.requests),
     };
   }
 
   private toNumber(value: unknown): number {
-    if (typeof value === 'number' && Number.isFinite(value)) {
+    if (typeof value === "number" && Number.isFinite(value)) {
       return value;
     }
 
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : 0;
     }

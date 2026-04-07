@@ -67,18 +67,23 @@ export interface CombinedUsageData {
 
 /** Display-friendly quota summary */
 export interface QuotaSummary {
-    tokenUsage: { percentage: number; used: number; total: number; };
-    mcpUsage: { percentage: number; used: number; total: number; };
-    monthlyResetAt: string;
-    /** Token数 consumed in the query time period */
-    consumedTokens?: number;
-    /** MCP tool calls in the query time period */
-    mcpToolCalls?: {
-        totalNetworkSearchCount: number;
-        totalWebReadMcpCount: number;
-        totalZreadMcpCount: number;
-        totalSearchMcpCount: number;
-    };
+  tokenUsage: { percentage: number; used: number; total: number };
+  mcpUsage: { percentage: number; used: number; total: number };
+  /** Token reset time (hourly, display as 时分) */
+  tokenResetAt?: string;
+  /** MCP reset time (monthly, display as 年月日时分) */
+  mcpResetAt?: string;
+  /** @deprecated Use tokenResetAt and mcpResetAt instead */
+  monthlyResetAt: string;
+  /** Token数 consumed in the query time period */
+  consumedTokens?: number;
+  /** MCP tool calls in the query time period */
+  mcpToolCalls?: {
+    totalNetworkSearchCount: number;
+    totalWebReadMcpCount: number;
+    totalZreadMcpCount: number;
+    totalSearchMcpCount: number;
+  };
 }
 
 export type UsageRange = 'today' | 'last7Days' | 'last30Days';
@@ -108,6 +113,25 @@ export type Platform = 'ZAI' | 'ZHIPU';
 
 /** API configuration */
 export interface ApiConfig {
-    authToken: string;
-    baseUrl: string;
+  authToken: string;
+  baseUrl: string;
 }
+
+/** Chart data point for trend visualization */
+export interface ChartDataPoint {
+  date: string;
+  dateLabel: string;
+  tokensUsed: number;
+  mcpCalls: number;
+}
+
+/** Chart dataset for rendering */
+export interface ChartDataset {
+  label: string;
+  data: ChartDataPoint[];
+  color: string;
+  unit: string;
+}
+
+/** Panel view type */
+export type PanelViewType = "overview" | "trend" | "details";

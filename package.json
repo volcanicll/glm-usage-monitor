@@ -2,7 +2,7 @@
   "name": "glm-usage-monitor",
   "displayName": "GLM Usage Monitor",
   "description": "在 VS Code 中监控您的 GLM Coding Plan 使用量",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "volcanic",
   "icon": "resources/icon-256.png",
   "repository": {
@@ -78,6 +78,33 @@
           "type": "boolean",
           "default": true,
           "description": "自动刷新使用量数据"
+        },
+        "glmUsage.cacheEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用数据缓存以提高性能"
+        },
+        "glmUsage.cacheTTL": {
+          "type": "number",
+          "default": 300,
+          "description": "缓存有效期（秒，默认：300 秒/5 分钟）"
+        },
+        "glmUsage.notificationThresholds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "default": [
+            50,
+            80,
+            95
+          ],
+          "description": "用量阈值提醒百分比（触发通知的用量百分比）"
+        },
+        "glmUsage.notificationEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用用量阈值提醒"
         }
       }
     }
