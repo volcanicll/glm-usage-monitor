@@ -29,12 +29,39 @@ export async function activate(context: vscode.ExtensionContext) {
   const credentials = await authService.getCredentials();
   if (!credentials) {
     statusBarItem.text = "$(circle-large-outline) GLM";
+
+    // Get debug information
+    const { debug } = await authService.getCredentialsWithDebug();
+    const debugMessage = debug.join('\n• ');
+
     const action = await vscode.window.showWarningMessage(
-      "GLM Usage 未读取到可用凭证。插件会先尝试读取 VS Code 进程环境变量，再尝试登录 shell 环境变量，最后才使用手动配置。",
+      `GLM Usage 未读取到可用凭证\n\n• ${debugMessage}\n\n插件会自动使用 Claude Code 配置文件中的凭证。`,
       "手动配置",
+      "查看调试信息",
     );
+
     if (action === "手动配置") {
       await showConfigurationDialog();
+    } else if (action === "查看调试信息") {
+      // Show detailed debug information in output channel
+      const outputChannel = vscode.window.createOutputChannel("GLM Usage Debug");
+      outputChannel.appendLine("=== GLM Usage 凭证调试信息 ===\n");
+      debug.forEach(line => outputChannel.appendLine(line));
+
+      outputChannel.appendLine("\n=== 凭证获取优先级 ===");
+      outputChannel.appendLine("1. Claude Code 配置文件 (~/.claude/settings.json)");
+      outputChannel.appendLine("2. VSCode 进程环境变量");
+      outputChannel.appendLine("3. 手动配置的凭证");
+
+      outputChannel.appendLine("\n=== 建议的解决方法 ===");
+      outputChannel.appendLine("方法 1 - 使用 Claude Code 配置文件（推荐）:");
+      outputChannel.appendLine("  Claude Code 会自动使用 ~/.claude/settings.json 中的凭证");
+      outputChannel.appendLine("  无需额外配置");
+      outputChannel.appendLine("");
+      outputChannel.appendLine("方法 2 - 手动配置:");
+      outputChannel.appendLine("  使用命令面板中的 \"GLM Usage: Configure\" 命令");
+
+      outputChannel.show();
     }
   } else {
     scheduleRefresh(config);
@@ -75,12 +102,67 @@ export async function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  // Diagnose credentials command
+  const diagnoseCommand = vscode.commands.registerCommand(
+    "glmUsage.diagnose",
+    async () => {
+      const outputChannel = vscode.window.createOutputChannel("GLM Usage Diagnostics");
+
+      outputChannel.appendLine("=== GLM Usage 凭证诊断 ===\n");
+
+      const { debug } = await authService.getCredentialsWithDebug();
+      debug.forEach(line => outputChannel.appendLine(`• ${line}`));
+
+      outputChannel.appendLine("\n=== 当前环境信息 ===");
+      outputChannel.appendLine(`Home: ${process.env.HOME || '未设置'}`);
+      outputChannel.appendLine(`Platform: ${process.platform}`);
+      outputChannel.appendLine(`VSCode Version: ${vscode.version}`);
+
+      outputChannel.appendLine("\n=== Claude Code 配置文件状态 ===");
+      const fs = require('fs');
+      const path = require('path');
+      const settingsPath = path.join(process.env.HOME || '', '.claude', 'settings.json');
+      if (fs.existsSync(settingsPath)) {
+        outputChannel.appendLine(`✓ 配置文件存在: ${settingsPath}`);
+        try {
+          const content = fs.readFileSync(settingsPath, 'utf-8');
+          const settings = JSON.parse(content);
+          if (settings.env?.ANTHROPIC_AUTH_TOKEN && settings.env?.ANTHROPIC_BASE_URL) {
+            outputChannel.appendLine("✓ 包含所需的凭证信息");
+          } else {
+            outputChannel.appendLine("✗ 配置文件中缺少 ANTHROPIC_AUTH_TOKEN 或 ANTHROPIC_BASE_URL");
+          }
+        } catch (e) {
+          outputChannel.appendLine(`✗ 无法读取配置文件: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      } else {
+        outputChannel.appendLine(`✗ 配置文件不存在: ${settingsPath}`);
+      }
+
+      outputChannel.appendLine("\n=== 凭证获取优先级 ===");
+      outputChannel.appendLine("1. Claude Code 配置文件 (~/.claude/settings.json)");
+      outputChannel.appendLine("2. VSCode 进程环境变量");
+      outputChannel.appendLine("3. 手动配置的凭证");
+
+      outputChannel.appendLine("\n=== 建议的解决方法 ===");
+      outputChannel.appendLine("方法 1 - 使用 Claude Code 配置文件（推荐）:");
+      outputChannel.appendLine("  Claude Code 会自动使用 ~/.claude/settings.json 中的凭证");
+      outputChannel.appendLine("  如果您已经配置了 Claude Code，无需额外操作");
+      outputChannel.appendLine("");
+      outputChannel.appendLine("方法 2 - 手动配置:");
+      outputChannel.appendLine("  使用命令面板中的 \"GLM Usage: Configure\" 命令");
+
+      outputChannel.show();
+    },
+  );
+
   // Register all disposables
   context.subscriptions.push(
     showUsageCommand,
     refreshCommand,
     configureCommand,
     clearCredentialsCommand,
+    diagnoseCommand,
   );
 
   // Configuration change listener

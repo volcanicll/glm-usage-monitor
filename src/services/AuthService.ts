@@ -1,26 +1,37 @@
 import * as vscode from 'vscode';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { ApiConfig } from '../types/api';
 
-const execFileAsync = promisify(execFile);
+interface ClaudeSettings {
+    env?: {
+        ANTHROPIC_AUTH_TOKEN?: string;
+        ANTHROPIC_BASE_URL?: string;
+        [key: string]: string | undefined;
+    };
+}
 
 export class AuthService {
-    private shellCredentialLookup: Promise<ApiConfig | null> | undefined;
-
     constructor(
         private secretStorage: vscode.SecretStorage,
         private config: vscode.WorkspaceConfiguration,
-        private shellEnvLoader: (() => Promise<ApiConfig | null>) | undefined = undefined,
     ) {}
 
     /**
      * Get credentials with priority:
-     * 1. Current VS Code extension process env
-     * 2. Login shell env
-     * 3. Stored secret/config values
+     * 1. Claude Code settings.json (~/.claude/settings.json)
+     * 2. VSCode process environment variables
+     * 3. Stored secret/config values (manual configuration)
      */
     async getCredentials(): Promise<ApiConfig | null> {
+        // 1. Try Claude Code settings.json first
+        const claudeCredentials = await this.getCredentialsFromClaudeSettings();
+        if (claudeCredentials) {
+            return claudeCredentials;
+        }
+
+        // 2. Try VSCode process environment variables
         const envToken = process.env.ANTHROPIC_AUTH_TOKEN;
         const envBaseUrl = process.env.ANTHROPIC_BASE_URL;
 
@@ -28,11 +39,7 @@ export class AuthService {
             return { authToken: envToken, baseUrl: envBaseUrl };
         }
 
-        const shellCredentials = await this.getShellCredentials();
-        if (shellCredentials) {
-            return shellCredentials;
-        }
-
+        // 3. Try stored credentials (manual configuration)
         const storedToken = await this.secretStorage.get('authToken');
         const storedBaseUrl = this.config.get<string>('baseUrl');
 
@@ -41,6 +48,91 @@ export class AuthService {
         }
 
         return null;
+    }
+
+    /**
+     * Read credentials from Claude Code settings.json
+     */
+    private async getCredentialsFromClaudeSettings(): Promise<ApiConfig | null> {
+        try {
+            const homeDir = os.homedir();
+            const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+
+            // Check if file exists
+            if (!fs.existsSync(settingsPath)) {
+                return null;
+            }
+
+            // Read and parse the file
+            const content = fs.readFileSync(settingsPath, 'utf-8');
+            const settings: ClaudeSettings = JSON.parse(content);
+
+            // Extract credentials from env section
+            const authToken = settings.env?.ANTHROPIC_AUTH_TOKEN;
+            const baseUrl = settings.env?.ANTHROPIC_BASE_URL;
+
+            if (authToken && baseUrl) {
+                return { authToken, baseUrl };
+            }
+
+            return null;
+        } catch {
+            // If reading fails silently return null
+            return null;
+        }
+    }
+
+    /**
+     * Get credentials with debug information
+     */
+    async getCredentialsWithDebug(): Promise<{ creds: ApiConfig | null; debug: string[] }> {
+        const debug: string[] = [];
+
+        // 1. Check Claude Code settings.json
+        const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+        debug.push(`Claude Code 配置文件: ${claudeSettingsPath}`);
+
+        try {
+            if (fs.existsSync(claudeSettingsPath)) {
+                const content = fs.readFileSync(claudeSettingsPath, 'utf-8');
+                const settings: ClaudeSettings = JSON.parse(content);
+                const hasToken = settings.env?.ANTHROPIC_AUTH_TOKEN;
+                const hasBaseUrl = settings.env?.ANTHROPIC_BASE_URL;
+                debug.push(`✓ 配置文件存在: ANTHROPIC_AUTH_TOKEN=${hasToken ? '已设置' : '未设置'}, ANTHROPIC_BASE_URL=${hasBaseUrl ? '已设置' : '未设置'}`);
+
+                if (hasToken && hasBaseUrl) {
+                    const creds = await this.getCredentialsFromClaudeSettings();
+                    if (creds) {
+                        debug.push('✓ 从 Claude Code 配置文件成功读取凭证');
+                        return { creds, debug };
+                    }
+                }
+            } else {
+                debug.push('✗ 配置文件不存在');
+            }
+        } catch (error) {
+            debug.push(`✗ 读取配置文件失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+
+        // 2. Check process environment variables
+        const envToken = process.env.ANTHROPIC_AUTH_TOKEN;
+        const envBaseUrl = process.env.ANTHROPIC_BASE_URL;
+        debug.push(`进程环境变量: ANTHROPIC_AUTH_TOKEN=${envToken ? '已设置' : '未设置'}, ANTHROPIC_BASE_URL=${envBaseUrl ? '已设置' : '未设置'}`);
+
+        if (envToken && envBaseUrl) {
+            return { creds: { authToken: envToken, baseUrl: envBaseUrl }, debug };
+        }
+
+        // 3. Check stored credentials
+        const storedToken = await this.secretStorage.get('authToken');
+        const storedBaseUrl = this.config.get<string>('baseUrl');
+        debug.push(`手动配置的凭证: authToken=${storedToken ? '已设置' : '未设置'}, baseUrl=${storedBaseUrl || '未设置'}`);
+
+        if (storedToken && storedBaseUrl) {
+            return { creds: { authToken: storedToken, baseUrl: storedBaseUrl }, debug };
+        }
+
+        return { creds: null, debug };
     }
 
     /**
@@ -65,49 +157,5 @@ export class AuthService {
     async hasCredentials(): Promise<boolean> {
         const creds = await this.getCredentials();
         return creds !== null;
-    }
-
-    private async getShellCredentials(): Promise<ApiConfig | null> {
-        if (!this.shellCredentialLookup) {
-            this.shellCredentialLookup = this.shellEnvLoader
-                ? this.shellEnvLoader()
-                : this.loadCredentialsFromLoginShell();
-        }
-
-        return this.shellCredentialLookup;
-    }
-
-    private async loadCredentialsFromLoginShell(): Promise<ApiConfig | null> {
-        try {
-            const shell = process.env.SHELL || '/bin/zsh';
-            const args = this.getShellArgs(shell);
-            const command = 'printf "%s\\n%s" "$ANTHROPIC_AUTH_TOKEN" "$ANTHROPIC_BASE_URL"';
-
-            const { stdout } = await execFileAsync(shell, [...args, command], {
-                timeout: 4000,
-                env: process.env,
-            });
-
-            const [authToken = '', baseUrl = ''] = stdout
-                .split(/\r?\n/)
-                .map((value) => value.trim())
-                .filter((value, index) => index < 2);
-
-            if (authToken && baseUrl) {
-                return { authToken, baseUrl };
-            }
-        } catch {
-            // Ignore shell env lookup failures and fall back to stored credentials.
-        }
-
-        return null;
-    }
-
-    private getShellArgs(shell: string): string[] {
-        if (shell.includes('fish')) {
-            return ['-l', '-c'];
-        }
-
-        return ['-ilc'];
     }
 }

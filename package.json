@@ -1,8 +1,8 @@
 {
   "name": "glm-usage-monitor",
   "displayName": "GLM Usage Monitor",
-  "description": "Monitor your GLM Coding Plan usage in VS Code",
-  "version": "0.0.1",
+  "description": "在 VS Code 中监控您的 GLM Coding Plan 使用量",
+  "version": "0.0.2",
   "publisher": "volcanic",
   "icon": "resources/icon-256.png",
   "repository": {
@@ -37,42 +37,47 @@
     "commands": [
       {
         "command": "glmUsage.showUsage",
-        "title": "Show GLM Usage Panel",
+        "title": "显示 GLM 使用量面板",
         "icon": "$(graph)"
       },
       {
         "command": "glmUsage.refresh",
-        "title": "Refresh GLM Usage",
+        "title": "刷新 GLM 使用量",
         "icon": "$(refresh)"
       },
       {
         "command": "glmUsage.configure",
-        "title": "Configure GLM Usage Monitor",
+        "title": "配置 GLM 使用量监控",
         "icon": "$(settings-gear)"
       },
       {
         "command": "glmUsage.clearCredentials",
-        "title": "Clear GLM API Credentials",
+        "title": "清除 GLM API 凭证",
         "icon": "$(discard)"
+      },
+      {
+        "command": "glmUsage.diagnose",
+        "title": "诊断 GLM 使用量凭证",
+        "icon": "$(search)"
       }
     ],
     "configuration": {
-      "title": "GLM Usage Monitor",
+      "title": "GLM 使用量监控",
       "properties": {
         "glmUsage.baseUrl": {
           "type": "string",
           "default": "https://api.z.ai/api/anthropic",
-          "description": "The base URL for the GLM API"
+          "description": "GLM API 基础 URL"
         },
         "glmUsage.refreshInterval": {
           "type": "number",
           "default": 600000,
-          "description": "Auto-refresh interval in milliseconds (default: 10 minutes)"
+          "description": "自动刷新间隔（毫秒，默认：10 分钟）"
         },
         "glmUsage.autoRefresh": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically refresh usage data"
+          "description": "自动刷新使用量数据"
         }
       }
     }

@@ -1,27 +1,30 @@
-# Changelog
+# 更新日志
 
-All notable changes to the "GLM Usage Monitor" extension will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.0.2] - 2026-04-07
 
-## [Unreleased]
+### 新增
+- **自动凭证配置**：支持自动读取 `~/.claude/settings.json` 中的凭证
+- **诊断命令**：新增凭证诊断功能，帮助排查配置问题
+- **调试信息面板**：提供详细的凭证配置状态信息
 
-### Added
-- Initial release of GLM Usage Monitor
-- Real-time token usage tracking via status bar
-- Secure API credential storage
-- Configurable auto-refresh interval
-- Time window analysis (24h, 7d, 30d)
-- Commands for viewing usage, refreshing data, and managing credentials
-- Configuration settings for API endpoint and refresh behavior
+### 改进
+- **简化凭证获取逻辑**：优先使用 Claude Code 配置文件，移除复杂的 shell 环境变量获取
+- **更好的错误提示**：提供更详细的配置指导和诊断信息
+- **用户体验优化**：更新所有提示信息为中文
+
+### 修复
+- 修复了构建后插件无法获取系统环境变量的问题
+- 优化了凭证获取的稳定性和可靠性
 
 ## [0.0.1] - 2026-04-03
 
-### Added
-- Initial release
-- VSCode extension activation on startup
-- Status bar integration with usage statistics
-- GLM API integration for usage data retrieval
-- Secure credential management
-- Manual and automatic refresh capabilities
+### 新增
+- 初始版本发布
+- 实时 token 使用量跟踪
+- 状态栏集成显示使用量统计
+- GLM API 集成获取使用量数据
+- 安全的凭证管理
+- 手动和自动刷新功能
+- 时间窗口分析（今日、近7天、近30天）
+- 可配置的自动刷新间隔

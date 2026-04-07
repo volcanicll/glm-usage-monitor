@@ -9,11 +9,12 @@ tsconfig.json
 **/*.spec.ts
 out/test/**
 
-# Documentation (except README.md)
+# Documentation (except README.md, CHANGELOG.md, TROUBLESHOOTING.md)
 docs/**
 **/*.md
 !README.md
 !CHANGELOG.md
+!TROUBLESHOOTING.md
 
 # Development files
 .vscode/**

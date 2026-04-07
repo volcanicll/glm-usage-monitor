@@ -1,10 +1,15 @@
 import assert from 'assert';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { AuthService } from '../../services/AuthService';
 
 suite('AuthService Tests', () => {
     // Store original env vars to restore after tests
     const originalEnv = { ...process.env };
+    let claudeSettingsBackup: string | null = null;
+    const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
 
     // Helper to clean up env vars
     function cleanEnv() {
@@ -12,13 +17,26 @@ suite('AuthService Tests', () => {
         delete process.env.ANTHROPIC_BASE_URL;
     }
 
-    // Restore env vars after all tests
+    // Backup Claude settings before tests and restore after
     setup(() => {
         cleanEnv();
+        // Temporarily hide Claude settings to test other credential sources
+        if (fs.existsSync(claudeSettingsPath)) {
+            const content = fs.readFileSync(claudeSettingsPath, 'utf-8');
+            claudeSettingsBackup = content;
+            // Rename temporarily
+            fs.renameSync(claudeSettingsPath, claudeSettingsPath + '.backup');
+        }
     });
 
     teardown(() => {
         process.env = { ...originalEnv };
+        // Restore Claude settings if backed up
+        if (claudeSettingsBackup && fs.existsSync(claudeSettingsPath + '.backup')) {
+            fs.writeFileSync(claudeSettingsPath, claudeSettingsBackup);
+            fs.unlinkSync(claudeSettingsPath + '.backup');
+            claudeSettingsBackup = null;
+        }
     });
 
     // Helper to create mock SecretStorage
@@ -56,7 +74,7 @@ suite('AuthService Tests', () => {
         assert.strictEqual(creds?.baseUrl, 'https://env.example.com');
     });
 
-    test('falls back to stored credentials when env and shell vars are not set', async () => {
+    test('falls back to stored credentials when Claude settings and env vars are not set', async () => {
         const mockSecretStorage = createMockSecretStorage('stored-token');
 
         const mockConfig: vscode.WorkspaceConfiguration = {
@@ -69,11 +87,7 @@ suite('AuthService Tests', () => {
             inspect: () => undefined
         };
 
-        const service = new AuthService(
-            mockSecretStorage,
-            mockConfig,
-            () => Promise.resolve(null),
-        );
+        const service = new AuthService(mockSecretStorage, mockConfig);
         const creds = await service.getCredentials();
 
         assert.ok(creds, 'Credentials should not be null when stored credentials exist');
@@ -81,8 +95,8 @@ suite('AuthService Tests', () => {
         assert.strictEqual(creds?.baseUrl, 'https://config.example.com');
     });
 
-    test('falls back to shell environment when process env is missing', async () => {
-        const mockSecretStorage = createMockSecretStorage(undefined);
+    test('falls back to stored credentials when env vars are not set', async () => {
+        const mockSecretStorage = createMockSecretStorage('stored-token');
 
         const mockConfig: vscode.WorkspaceConfiguration = {
             get: <T>(key: string, defaultValue?: T) => {
@@ -94,19 +108,12 @@ suite('AuthService Tests', () => {
             inspect: () => undefined
         };
 
-        const service = new AuthService(
-            mockSecretStorage,
-            mockConfig,
-            () => Promise.resolve({
-                authToken: 'shell-token',
-                baseUrl: 'https://shell.example.com',
-            }),
-        );
+        const service = new AuthService(mockSecretStorage, mockConfig);
         const creds = await service.getCredentials();
 
-        assert.ok(creds, 'Credentials should not be null when shell env exists');
-        assert.strictEqual(creds?.authToken, 'shell-token');
-        assert.strictEqual(creds?.baseUrl, 'https://shell.example.com');
+        assert.ok(creds, 'Credentials should not be null when stored credentials exist');
+        assert.strictEqual(creds?.authToken, 'stored-token');
+        assert.strictEqual(creds?.baseUrl, 'https://config.example.com');
     });
 
     test('returns null when no credentials available', async () => {
@@ -122,11 +129,7 @@ suite('AuthService Tests', () => {
             inspect: () => undefined
         };
 
-        const service = new AuthService(
-            mockSecretStorage,
-            mockConfig,
-            () => Promise.resolve(null),
-        );
+        const service = new AuthService(mockSecretStorage, mockConfig);
         const creds = await service.getCredentials();
 
         assert.strictEqual(creds, null, 'Credentials should be null when none available');
@@ -154,8 +157,8 @@ suite('AuthService Tests', () => {
         assert.strictEqual(hasCreds, true, 'hasCredentials should return true when credentials exist');
     });
 
-    test('hasCredentials returns false when no env, shell, or stored credentials exist', async () => {
-        const mockSecretStorage = createMockSecretStorage('stored-token');
+    test('hasCredentials returns false when no Claude settings, env, or stored credentials exist', async () => {
+        const mockSecretStorage = createMockSecretStorage(undefined);
 
         const mockConfig: vscode.WorkspaceConfiguration = {
             get: <T>(key: string, defaultValue?: T) => {
@@ -167,11 +170,7 @@ suite('AuthService Tests', () => {
             inspect: () => undefined
         };
 
-        const service = new AuthService(
-            createMockSecretStorage(undefined),
-            mockConfig,
-            () => Promise.resolve(null),
-        );
+        const service = new AuthService(mockSecretStorage, mockConfig);
         const hasCreds = await service.hasCredentials();
 
         assert.strictEqual(hasCreds, false, 'hasCredentials should return false when no credentials');
