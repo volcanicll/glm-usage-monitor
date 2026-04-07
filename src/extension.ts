@@ -1,38 +1,47 @@
-import * as vscode from 'vscode';
-import { AuthService } from './services/AuthService';
-import { GLMUsageService } from './services/GLMUsageService';
-import { QuotaSummary, UsageRange } from './types/api';
-import { getUsageRangeLabel } from './util/timeWindow';
+import * as vscode from "vscode";
+import { CacheService } from "./core/CacheService";
+import { AuthService } from "./services/AuthService";
+import { GLMUsageService } from "./services/GLMUsageService";
+import { StatusBarManager } from "./services/StatusBarManager";
+import { UsagePanel } from "./views/UsagePanel";
+import { ThresholdNotifier } from "./notifications/ThresholdNotifier";
+import { QuotaSummary, UsageRange } from "./types/api";
 
 let refreshTimer: NodeJS.Timeout | undefined;
 let authService: AuthService;
 let glmUsageService: GLMUsageService | undefined;
-let statusBarItem: vscode.StatusBarItem;
-let webviewPanel: vscode.WebviewPanel | undefined;
+let statusBarManager: StatusBarManager;
+let usagePanel: UsagePanel;
+let thresholdNotifier: ThresholdNotifier;
+let cacheService: CacheService;
+let currentRange: UsageRange = "today";
 let summaryCache: Map<UsageRange, QuotaSummary> = new Map();
-let currentRange: UsageRange = 'today';
 
 export async function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("glmUsage");
   authService = new AuthService(context.secrets, config);
 
-  // Create status bar item
-  statusBarItem = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Right,
-    100,
+  // Initialize new services
+  cacheService = new CacheService();
+  statusBarManager = new StatusBarManager();
+  usagePanel = new UsagePanel(context);
+
+  // Initialize threshold notifier with config values
+  const thresholds = config.get<number[]>(
+    "notificationThresholds",
+    [50, 80, 95],
   );
-  statusBarItem.tooltip = "GLM Usage Monitor - 点击查看详情";
-  statusBarItem.command = 'glmUsage.showUsage';
-  statusBarItem.show();
+  const notificationEnabled = config.get<boolean>("notificationEnabled", true);
+  thresholdNotifier = new ThresholdNotifier(thresholds, notificationEnabled);
 
   // Check if credentials exist
   const credentials = await authService.getCredentials();
   if (!credentials) {
-    statusBarItem.text = "$(circle-large-outline) GLM";
+    statusBarManager.clear();
 
     // Get debug information
     const { debug } = await authService.getCredentialsWithDebug();
-    const debugMessage = debug.join('\n• ');
+    const debugMessage = debug.join("\n• ");
 
     const action = await vscode.window.showWarningMessage(
       `GLM Usage 未读取到可用凭证\n\n• ${debugMessage}\n\n插件会自动使用 Claude Code 配置文件中的凭证。`,
@@ -43,23 +52,29 @@ export async function activate(context: vscode.ExtensionContext) {
     if (action === "手动配置") {
       await showConfigurationDialog();
     } else if (action === "查看调试信息") {
-      // Show detailed debug information in output channel
-      const outputChannel = vscode.window.createOutputChannel("GLM Usage Debug");
+      const outputChannel =
+        vscode.window.createOutputChannel("GLM Usage Debug");
       outputChannel.appendLine("=== GLM Usage 凭证调试信息 ===\n");
-      debug.forEach(line => outputChannel.appendLine(line));
+      debug.forEach((line) => outputChannel.appendLine(line));
 
       outputChannel.appendLine("\n=== 凭证获取优先级 ===");
-      outputChannel.appendLine("1. Claude Code 配置文件 (~/.claude/settings.json)");
+      outputChannel.appendLine(
+        "1. Claude Code 配置文件 (~/.claude/settings.json)",
+      );
       outputChannel.appendLine("2. VSCode 进程环境变量");
       outputChannel.appendLine("3. 手动配置的凭证");
 
       outputChannel.appendLine("\n=== 建议的解决方法 ===");
       outputChannel.appendLine("方法 1 - 使用 Claude Code 配置文件（推荐）:");
-      outputChannel.appendLine("  Claude Code 会自动使用 ~/.claude/settings.json 中的凭证");
+      outputChannel.appendLine(
+        "  Claude Code 会自动使用 ~/.claude/settings.json 中的凭证",
+      );
       outputChannel.appendLine("  无需额外配置");
       outputChannel.appendLine("");
       outputChannel.appendLine("方法 2 - 手动配置:");
-      outputChannel.appendLine("  使用命令面板中的 \"GLM Usage: Configure\" 命令");
+      outputChannel.appendLine(
+        '  使用命令面板中的 "GLM Usage: Configure" 命令',
+      );
 
       outputChannel.show();
     }
@@ -83,6 +98,16 @@ export async function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  // Change range command
+  const changeRangeCommand = vscode.commands.registerCommand(
+    "glmUsage.changeRange",
+    async (range: UsageRange) => {
+      currentRange = range;
+      cacheService.clear();
+      await refreshUsage(false);
+    },
+  );
+
   // Configure command
   const configureCommand = vscode.commands.registerCommand(
     "glmUsage.configure",
@@ -96,9 +121,11 @@ export async function activate(context: vscode.ExtensionContext) {
     "glmUsage.clearCredentials",
     async () => {
       await authService.clearCredentials();
+      cacheService.clear();
       vscode.window.showInformationMessage(
-        "Stored credentials cleared. Extension will use environment variables if available.",
+        "已清除存储的凭证，下次使用时将使用环境变量或重新配置。",
       );
+      statusBarManager.clear();
     },
   );
 
@@ -106,51 +133,65 @@ export async function activate(context: vscode.ExtensionContext) {
   const diagnoseCommand = vscode.commands.registerCommand(
     "glmUsage.diagnose",
     async () => {
-      const outputChannel = vscode.window.createOutputChannel("GLM Usage Diagnostics");
+      const outputChannel = vscode.window.createOutputChannel(
+        "GLM Usage Diagnostics",
+      );
 
       outputChannel.appendLine("=== GLM Usage 凭证诊断 ===\n");
 
       const { debug } = await authService.getCredentialsWithDebug();
-      debug.forEach(line => outputChannel.appendLine(`• ${line}`));
+      debug.forEach((line) => outputChannel.appendLine(`• ${line}`));
+
+      outputChannel.appendLine("\n=== 缓存状态 ===");
+      const stats = cacheService.getStats();
+      outputChannel.appendLine(
+        `  命中率: ${stats.hits + stats.misses > 0 ? ((stats.hits / (stats.hits + stats.misses)) * 100).toFixed(1) : 0}%`,
+      );
+      outputChannel.appendLine(`  缓存条目: ${stats.size}`);
 
       outputChannel.appendLine("\n=== 当前环境信息 ===");
-      outputChannel.appendLine(`Home: ${process.env.HOME || '未设置'}`);
+      outputChannel.appendLine(`Home: ${process.env.HOME || "未设置"}`);
       outputChannel.appendLine(`Platform: ${process.platform}`);
       outputChannel.appendLine(`VSCode Version: ${vscode.version}`);
 
       outputChannel.appendLine("\n=== Claude Code 配置文件状态 ===");
-      const fs = require('fs');
-      const path = require('path');
-      const settingsPath = path.join(process.env.HOME || '', '.claude', 'settings.json');
+      const fs = require("fs");
+      const path = require("path");
+      const settingsPath = path.join(
+        process.env.HOME || "",
+        ".claude",
+        "settings.json",
+      );
       if (fs.existsSync(settingsPath)) {
         outputChannel.appendLine(`✓ 配置文件存在: ${settingsPath}`);
         try {
-          const content = fs.readFileSync(settingsPath, 'utf-8');
+          const content = fs.readFileSync(settingsPath, "utf-8");
           const settings = JSON.parse(content);
-          if (settings.env?.ANTHROPIC_AUTH_TOKEN && settings.env?.ANTHROPIC_BASE_URL) {
+          if (
+            settings.env?.ANTHROPIC_AUTH_TOKEN &&
+            settings.env?.ANTHROPIC_BASE_URL
+          ) {
             outputChannel.appendLine("✓ 包含所需的凭证信息");
           } else {
-            outputChannel.appendLine("✗ 配置文件中缺少 ANTHROPIC_AUTH_TOKEN 或 ANTHROPIC_BASE_URL");
+            outputChannel.appendLine(
+              "✗ 配置文件中缺少 ANTHROPIC_AUTH_TOKEN 或 ANTHROPIC_BASE_URL",
+            );
           }
         } catch (e) {
-          outputChannel.appendLine(`✗ 无法读取配置文件: ${e instanceof Error ? e.message : 'Unknown error'}`);
+          outputChannel.appendLine(
+            `✗ 无法读取配置文件: ${e instanceof Error ? e.message : "Unknown error"}`,
+          );
         }
       } else {
         outputChannel.appendLine(`✗ 配置文件不存在: ${settingsPath}`);
       }
 
       outputChannel.appendLine("\n=== 凭证获取优先级 ===");
-      outputChannel.appendLine("1. Claude Code 配置文件 (~/.claude/settings.json)");
+      outputChannel.appendLine(
+        "1. Claude Code 配置文件 (~/.claude/settings.json)",
+      );
       outputChannel.appendLine("2. VSCode 进程环境变量");
       outputChannel.appendLine("3. 手动配置的凭证");
-
-      outputChannel.appendLine("\n=== 建议的解决方法 ===");
-      outputChannel.appendLine("方法 1 - 使用 Claude Code 配置文件（推荐）:");
-      outputChannel.appendLine("  Claude Code 会自动使用 ~/.claude/settings.json 中的凭证");
-      outputChannel.appendLine("  如果您已经配置了 Claude Code，无需额外操作");
-      outputChannel.appendLine("");
-      outputChannel.appendLine("方法 2 - 手动配置:");
-      outputChannel.appendLine("  使用命令面板中的 \"GLM Usage: Configure\" 命令");
 
       outputChannel.show();
     },
@@ -160,9 +201,11 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     showUsageCommand,
     refreshCommand,
+    changeRangeCommand,
     configureCommand,
     clearCredentialsCommand,
     diagnoseCommand,
+    statusBarManager,
   );
 
   // Configuration change listener
@@ -172,7 +215,21 @@ export async function activate(context: vscode.ExtensionContext) {
         const newConfig = vscode.workspace.getConfiguration("glmUsage");
         const hasCredentials = await authService.hasCredentials();
         if (hasCredentials) {
+          // Update threshold notifier config
+          const newThresholds = newConfig.get<number[]>(
+            "notificationThresholds",
+            [50, 80, 95],
+          );
+          const newEnabled = newConfig.get<boolean>(
+            "notificationEnabled",
+            true,
+          );
+          thresholdNotifier.setThresholds(newThresholds);
+          thresholdNotifier.setEnabled(newEnabled);
+
           scheduleRefresh(newConfig);
+        } else {
+          statusBarManager.clear();
         }
       }
     },
@@ -183,364 +240,79 @@ export async function activate(context: vscode.ExtensionContext) {
 async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary> {
   const creds = await authService.getCredentials();
   if (!creds) {
-    throw new Error('No credentials configured');
+    throw new Error("未配置凭证");
   }
+
+  const cacheEnabled = vscode.workspace
+    .getConfiguration("glmUsage")
+    .get<boolean>("cacheEnabled", true);
 
   if (!glmUsageService) {
-    glmUsageService = new GLMUsageService(creds);
+    glmUsageService = new GLMUsageService(creds, cacheService, cacheEnabled);
   }
 
-  const data = await glmUsageService.fetchUsageByRange(range);
-  return glmUsageService.parseCompleteUsageData(data.quotaLimits, data.modelUsage, data.toolUsage);
+  const forceRefresh = !cacheEnabled;
+  const data = await Promise.all([
+    glmUsageService.fetchQuotaLimits(forceRefresh),
+    glmUsageService.fetchModelUsage(range, forceRefresh),
+    glmUsageService.fetchToolUsage(range, forceRefresh),
+  ]);
+
+  const summary = glmUsageService.parseCompleteUsageData(
+    data[0],
+    data[1],
+    data[2],
+  );
+  summaryCache.set(range, summary);
+  return summary;
 }
 
 async function showUsagePanel(): Promise<void> {
-  // If panel already exists, reveal it
-  if (webviewPanel) {
-    webviewPanel.reveal();
-    return;
-  }
-
-  // Fetch current data
-  try {
-    const summary = await fetchAndParseUsage(currentRange);
-    summaryCache.set(currentRange, summary);
-  } catch (error) {
-    vscode.window.showErrorMessage(`获取数据失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-
-  // Create webview panel
-  webviewPanel = vscode.window.createWebviewPanel(
-    'glmUsagePanel',
-    'GLM Usage',
-    vscode.ViewColumn.Beside,
-    {
-      enableScripts: true,
-      retainContextWhenHidden: true,
-      localResourceRoots: [],
-    }
-  );
-
-  webviewPanel.onDidDispose(() => {
-    webviewPanel = undefined;
-  });
-
-  webviewPanel.webview.onDidReceiveMessage(async (message) => {
-    switch (message.type) {
-      case 'changeRange':
-        currentRange = message.range as UsageRange;
-        await refreshPanel();
-        break;
-      case 'refresh':
-        await refreshPanel();
-        break;
-      case 'ready':
-        updatePanelContent();
-        break;
-    }
-  });
-
-  updatePanelContent();
-}
-
-function updatePanelContent(): void {
-  if (!webviewPanel) {
-    return;
-  }
-
   const summary = summaryCache.get(currentRange);
   if (!summary) {
-    webviewPanel.webview.html = getLoadingHtml();
+    statusBarManager.showLoading();
+    try {
+      const newSummary = await fetchAndParseUsage(currentRange);
+      statusBarManager.update(newSummary, currentRange);
+      thresholdNotifier.check(newSummary);
+      await usagePanel.show(newSummary, currentRange);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "未知错误";
+      statusBarManager.showError(message);
+      vscode.window.showErrorMessage(`获取数据失败: ${message}`);
+    }
     return;
   }
 
-  webviewPanel.webview.html = getPanelHtml(summary);
-}
-
-async function refreshPanel(): Promise<void> {
-  if (!webviewPanel) {
-    return;
-  }
-
-  webviewPanel.webview.html = getLoadingHtml();
-
-  try {
-    const summary = await fetchAndParseUsage(currentRange);
-    summaryCache.set(currentRange, summary);
-    updatePanelContent();
-
-    // Update status bar
-    const tokenPercent = summary.tokenUsage.percentage;
-    const mcpPercent = summary.mcpUsage.percentage;
-    statusBarItem.text = `$(pulse) ${tokenPercent}% | $(tools) ${mcpPercent}%`;
-  } catch (error) {
-    webviewPanel.webview.html = getErrorHtml(error instanceof Error ? error.message : 'Unknown error');
-  }
-}
-
-function getPanelHtml(summary: QuotaSummary): string {
-  const ranges: UsageRange[] = ['today', 'last7Days', 'last30Days'];
-
-  const tokenPercent = summary.tokenUsage.percentage;
-  const tokenUsed = summary.tokenUsage.used;
-  const tokenTotal = summary.tokenUsage.total;
-  const tokenRemaining = Math.max(0, tokenTotal - tokenUsed);
-
-  const mcpPercent = summary.mcpUsage.percentage;
-  const mcpUsed = summary.mcpUsage.used;
-  const mcpTotal = summary.mcpUsage.total;
-  const mcpRemaining = Math.max(0, mcpTotal - mcpUsed);
-
-  const consumedTokens = summary.consumedTokens !== undefined
-    ? `<div class="info-row"><span class="info-label">消耗Token</span><span class="info-value">${formatTokenCount(summary.consumedTokens)}</span></div>`
-    : '';
-
-  const toolCalls = summary.mcpToolCalls ? `
-    <div class="tool-section">
-      <div class="section-title">工具调用</div>
-      <div class="tool-grid">
-        <div class="tool-item">
-          <span class="tool-label">网络搜索</span>
-          <span class="tool-count">${summary.mcpToolCalls.totalNetworkSearchCount}</span>
-        </div>
-        <div class="tool-item">
-          <span class="tool-label">网页阅读</span>
-          <span class="tool-count">${summary.mcpToolCalls.totalWebReadMcpCount}</span>
-        </div>
-        <div class="tool-item">
-          <span class="tool-label">Z阅读</span>
-          <span class="tool-count">${summary.mcpToolCalls.totalZreadMcpCount}</span>
-        </div>
-      </div>
-    </div>
-  ` : '';
-
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GLM Usage</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      padding: 16px;
-      font-size: 13px;
-    }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-    }
-    .title { font-size: 16px; font-weight: 600; }
-    .refresh-btn {
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-      border: none;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .refresh-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
-    .tabs { display: flex; gap: 4px; margin-bottom: 16px; background: var(--vscode-editor-selectionBackground); border-radius: 6px; padding: 4px; }
-    .tab {
-      flex: 1;
-      text-align: center;
-      padding: 8px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--vscode-descriptionForeground);
-    }
-    .tab:hover { background: var(--vscode-toolbar-hoverBackground); }
-    .tab.active { background: var(--vscode-textBlockQuote-background); color: var(--vscode-foreground); font-weight: 500; }
-    .card {
-      background: var(--vscode-editor-background);
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 12px;
-    }
-    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .card-title { font-size: 13px; font-weight: 600; }
-    .card-percent { font-size: 18px; font-weight: 700; }
-    .progress-bar { height: 6px; background: var(--vscode-progressBar-background); border-radius: 3px; overflow: hidden; margin: 8px 0; }
-    .progress-fill { height: 100%; background: var(--vscode-progressBar-foreground); transition: width 0.3s ease; }
-    .progress-fill.warning { background: #d9a441; }
-    .progress-fill.danger { background: #d05d5d; }
-    .info-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; }
-    .info-label { color: var(--vscode-descriptionForeground); }
-    .info-value { font-weight: 500; }
-    .divider { height: 1px; background: var(--vscode-panel-border); margin: 8px 0; }
-    .tool-section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
-    .section-title { font-size: 12px; font-weight: 500; margin-bottom: 8px; }
-    .tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-    .tool-item { display: flex; flex-direction: column; align-items: center; padding: 8px; background: var(--vscode-editor-selectionBackground); border-radius: 6px; }
-    .tool-label { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
-    .tool-count { font-size: 13px; font-weight: 600; }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div class="title">📊 GLM 使用量</div>
-    <button class="refresh-btn" onclick="refresh()">🔄 刷新</button>
-  </div>
-
-  <div class="tabs">
-    ${ranges.map(range => {
-      const label = getUsageRangeLabel(range);
-      const active = range === currentRange ? 'active' : '';
-      return `<div class="tab ${active}" onclick="changeRange('${range}')">${label}</div>`;
-    }).join('')}
-  </div>
-
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">Token 配额</div>
-      <div class="card-percent">${tokenPercent}%</div>
-    </div>
-    <div class="progress-bar">
-      <div class="progress-fill ${getProgressClass(tokenPercent)}" style="width: ${tokenPercent}%"></div>
-    </div>
-    <div class="info-row"><span class="info-label">已用</span><span class="info-value">${formatNumber(tokenUsed)}</span></div>
-    <div class="info-row"><span class="info-label">总量</span><span class="info-value">${formatNumber(tokenTotal)}</span></div>
-    <div class="info-row"><span class="info-label">剩余</span><span class="info-value">${formatNumber(tokenRemaining)}</span></div>
-    ${consumedTokens}
-    <div class="divider"></div>
-    <div class="info-row"><span class="info-label">重置时间</span><span class="info-value">${formatTimeHourMinute(summary.monthlyResetAt)}</span></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">MCP 配额</div>
-      <div class="card-percent">${mcpPercent}%</div>
-    </div>
-    <div class="progress-bar">
-      <div class="progress-fill ${getProgressClass(mcpPercent)}" style="width: ${mcpPercent}%"></div>
-    </div>
-    <div class="info-row"><span class="info-label">已用</span><span class="info-value">${formatNumber(mcpUsed)}</span></div>
-    <div class="info-row"><span class="info-label">总量</span><span class="info-value">${formatNumber(mcpTotal)}</span></div>
-    <div class="info-row"><span class="info-label">剩余</span><span class="info-value">${formatNumber(mcpRemaining)}</span></div>
-    <div class="divider"></div>
-    <div class="info-row"><span class="info-label">重置时间</span><span class="info-value">${formatTimeYearMonthDayHourMinute(summary.monthlyResetAt)}</span></div>
-    ${toolCalls}
-  </div>
-
-  <script>
-    const vscode = acquireVsCodeApi();
-
-    function changeRange(range) {
-      vscode.postMessage({ type: 'changeRange', range: range });
-    }
-
-    function refresh() {
-      vscode.postMessage({ type: 'refresh' });
-    }
-
-    setTimeout(() => { vscode.postMessage({ type: 'ready' }); }, 100);
-  </script>
-</body>
-</html>`;
-}
-
-function getLoadingHtml(): string {
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body {
-      font-family: var(--vscode-font-family);
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-  </style>
-</head>
-<body><div>正在加载数据...</div></body>
-</html>`;
-}
-
-function getErrorHtml(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body {
-      font-family: var(--vscode-font-family);
-      color: var(--vscode-errorForeground);
-      background: var(--vscode-editor-background);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      padding: 20px;
-      text-align: center;
-    }
-  </style>
-</head>
-<body><div>加载失败: ${message}</div></body>
-</html>`;
-}
-
-function getProgressClass(percentage: number): string {
-  if (percentage >= 80) return 'danger';
-  if (percentage >= 60) return 'warning';
-  return '';
+  await usagePanel.show(summary, currentRange);
 }
 
 async function refreshUsage(showNotification = false): Promise<void> {
+  statusBarManager.showLoading();
+
   try {
-    statusBarItem.text = "$(sync~spin) Loading...";
-    statusBarItem.tooltip = "Fetching GLM usage data...";
-
-    const creds = await authService.getCredentials();
-    if (!creds) {
-      throw new Error('No credentials configured');
-    }
-
-    const service = new GLMUsageService(creds);
-    glmUsageService = service;
-    const data = await service.fetchAllUsage();
-    const summary = service.parseCompleteUsageData(data.quotaLimits, data.modelUsage, data.toolUsage);
-
-    summaryCache.set(currentRange, summary);
-
-    const tokenPercent = summary.tokenUsage.percentage;
-    const mcpPercent = summary.mcpUsage.percentage;
-    statusBarItem.text = `$(pulse) ${tokenPercent}% | $(tools) ${mcpPercent}%`;
-    statusBarItem.tooltip = "GLM Usage Monitor - 点击查看详情";
+    const summary = await fetchAndParseUsage(currentRange);
+    statusBarManager.update(summary, currentRange);
+    thresholdNotifier.check(summary);
 
     // Update panel if open
-    if (webviewPanel) {
-      updatePanelContent();
-    }
+    await usagePanel.update(summary, currentRange);
 
     if (showNotification) {
       vscode.window.showInformationMessage(
-        `GLM Usage: Token ${tokenPercent}% | MCP ${mcpPercent}%`,
+        `GLM Usage: Token ${Math.round(summary.tokenUsage.percentage)}% | MCP ${Math.round(summary.mcpUsage.percentage)}%`,
       );
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    statusBarItem.text = "$(error) GLM Error";
-    statusBarItem.tooltip = `Error: ${errorMessage}`;
-    vscode.window.showErrorMessage(`GLM Usage Error: ${errorMessage}`);
+    const message = error instanceof Error ? error.message : "未知错误";
+    statusBarManager.showError(message);
+    vscode.window.showErrorMessage(`GLM 使用量获取失败: ${message}`);
   }
 }
 
 function scheduleRefresh(config: vscode.WorkspaceConfiguration): void {
-  const interval = config.get<number>('refreshInterval', 600000);
-  const autoRefresh = config.get<boolean>('autoRefresh', true);
+  const interval = config.get<number>("refreshInterval", 600000);
+  const autoRefresh = config.get<boolean>("autoRefresh", true);
 
   if (refreshTimer) {
     clearInterval(refreshTimer);
@@ -560,13 +332,14 @@ export function deactivate() {
   if (refreshTimer) {
     clearInterval(refreshTimer);
   }
-  webviewPanel?.dispose();
-  statusBarItem?.dispose();
+  usagePanel.dispose();
+  statusBarManager.dispose();
 }
 
 async function showConfigurationDialog(): Promise<void> {
   const authToken = await vscode.window.showInputBox({
-    prompt: 'Enter your GLM API Auth Token',
+    prompt: "输入 GLM API Auth Token",
+    placeHolder: "sk-...",
     password: true,
     ignoreFocusOut: true,
   });
@@ -576,8 +349,8 @@ async function showConfigurationDialog(): Promise<void> {
   }
 
   const baseUrl = await vscode.window.showInputBox({
-    prompt: 'Enter your GLM API Base URL',
-    value: 'https://api.z.ai/api/anthropic',
+    prompt: "输入 GLM API Base URL",
+    value: "https://api.z.ai/api/anthropic",
     ignoreFocusOut: true,
   });
 
@@ -586,47 +359,9 @@ async function showConfigurationDialog(): Promise<void> {
   }
 
   await authService.storeCredentials(authToken, baseUrl);
-  vscode.window.showInformationMessage('Credentials saved successfully.');
+  cacheService.clear();
+  vscode.window.showInformationMessage("凭证保存成功。");
 
-  const config = vscode.workspace.getConfiguration('glmUsage');
+  const config = vscode.workspace.getConfiguration("glmUsage");
   scheduleRefresh(config);
-}
-
-function formatNumber(value: number): string {
-  return value.toLocaleString("zh-CN");
-}
-
-function formatTokenCount(value: number): string {
-  if (value >= 1_000_000_000) {
-    const billions = value / 1_000_000_000;
-    return `${billions.toFixed(billions >= 10 ? 0 : 1)}B`;
-  }
-  if (value >= 1_000_000) {
-    const millions = value / 1_000_000;
-    return `${millions.toFixed(millions >= 10 ? 0 : 1)}M`;
-  }
-  if (value >= 1_000) {
-    const thousands = value / 1_000;
-    return `${thousands.toFixed(thousands >= 10 ? 0 : 1)}K`;
-  }
-  return value.toString();
-}
-
-function formatTimeHourMinute(value: string): string {
-  return new Date(value).toLocaleString("zh-CN", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatTimeYearMonthDayHourMinute(value: string): string {
-  return new Date(value).toLocaleString("zh-CN", {
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }

@@ -1,5 +1,32 @@
 # 更新日志
 
+## [0.0.3] - 2026-04-07
+
+### 新增
+- **智能缓存系统**：新增 CacheService，LRU 缓存策略，可配置 TTL，减少重复 API 调用
+- **阈值提醒功能**：新增 ThresholdNotifier，支持多级阈值（50%/80%/95%）提醒，月度自动重置
+- **增强状态栏**：全新 StatusBarManager，支持三种显示模式（详细/紧凑/精简），动态颜色变化
+- **重新设计面板**：全新 UsagePanel，圆形仪表盘可视化，进度条，工具调用网格展示
+- **新增配置项**：
+  - `glmUsage.cacheEnabled`：启用/禁用数据缓存
+  - `glmUsage.cacheTTL`：缓存有效期（秒）
+  - `glmUsage.notificationThresholds`：用量阈值提醒百分比
+  - `glmUsage.notificationEnabled`：启用/禁用用量阈值提醒
+
+### 改进
+- **性能提升**：智能缓存机制，相同时间窗口数据复用，减少网络请求
+- **用户体验**：状态栏显示更丰富的用量信息和重置时间
+- **可视化增强**：面板采用圆形仪表盘和进度条展示用量百分比
+- **代码质量**：重构 extension.ts，模块化架构，新增独立服务组件
+- **品牌更新**：更新扩展图标为符合 VS Code 规范的 128x128 和 256x256 PNG 格式
+
+### 架构变更
+- 新增 `src/core/CacheService.ts` - LRU 缓存服务
+- 新增 `src/services/StatusBarManager.ts` - 增强状态栏管理
+- 新增 `src/views/UsagePanel.ts` - 使用量面板视图
+- 新增 `src/notifications/ThresholdNotifier.ts` - 阈值提醒管理
+- 新增 `src/types/api.ts` 图表类型定义
+
 
 ## [0.0.2] - 2026-04-07
 
