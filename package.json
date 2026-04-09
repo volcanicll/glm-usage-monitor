@@ -2,7 +2,7 @@
   "name": "glm-usage-monitor",
   "displayName": "GLM Usage Monitor",
   "description": "在 VS Code 中监控您的 GLM Coding Plan 使用量",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "volcanic",
   "icon": "resources/icon-256.png",
   "repository": {
@@ -105,6 +105,16 @@
           "type": "boolean",
           "default": true,
           "description": "启用用量阈值提醒"
+        },
+        "glmUsage.statusBarMode": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "compact",
+            "detailed"
+          ],
+          "default": "detailed",
+          "description": "状态栏显示模式: minimal(仅百分比), compact(Token百分比), detailed(Token和MCP)"
         }
       }
     }

@@ -18,12 +18,16 @@ export class StatusBarManager {
   private isLoading = false;
   private error: string | null = null;
 
-  constructor() {
+  constructor(mode: StatusBarMode = "detailed") {
+    this.mode = mode;
     this.statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
       100,
     );
-    this.statusBarItem.tooltip = "GLM Usage Monitor - 点击查看详情";
+    this.statusBarItem.tooltip = this.createTooltipMarkdown(
+      "GLM Usage Monitor",
+      "点击打开面板",
+    );
     this.statusBarItem.command = "glmUsage.showUsage";
     this.statusBarItem.show();
   }
@@ -87,8 +91,30 @@ export class StatusBarManager {
     this.error = null;
     this.isLoading = false;
     this.statusBarItem.text = "$(circle-large-outline) GLM";
-    this.statusBarItem.tooltip = "GLM Usage Monitor - 未配置凭证";
+    this.statusBarItem.tooltip = this.createTooltipMarkdown(
+      "GLM Usage Monitor",
+      "未配置凭证",
+    );
     this.statusBarItem.color = undefined;
+  }
+
+  /**
+   * Show no credentials state - passive notification
+   */
+  showNoCredentials(): void {
+    this.currentSummary = null;
+    this.error = null;
+    this.isLoading = false;
+    this.statusBarItem.text = "$(key) GLM 未配置";
+    this.statusBarItem.tooltip = this.createTooltipMarkdown(
+      "GLM Usage Monitor",
+      "点击打开面板",
+      [
+        "Claude Code / 环境变量 / 手动配置",
+      ],
+    );
+    this.statusBarItem.color = new vscode.ThemeColor("descriptionForeground");
+    this.statusBarItem.command = "glmUsage.showUsage";
   }
 
   /**
@@ -152,31 +178,43 @@ export class StatusBarManager {
 
     switch (this.mode) {
       case "minimal":
-        return `${icon} ${tokenPercent}%`;
+        return `${icon} GLM ${Math.max(tokenPercent, mcpPercent)}%`;
 
       case "compact":
-        return `${icon} Token ${tokenPercent}%`;
+        return `${icon} T ${tokenPercent}% · M ${mcpPercent}%`;
 
       case "detailed":
       default:
-        return `${icon} Token ${tokenPercent}% | MCP ${mcpPercent}% `;
+        return `${icon} GLM T ${tokenPercent}% · M ${mcpPercent}%`;
     }
   }
 
   /**
    * Get tooltip content
    */
-  private getTooltip(): string {
+  private getTooltip(): vscode.MarkdownString {
     if (this.error) {
-      return `GLM Usage Monitor\n错误: ${this.error}\n点击查看详情`;
+      return this.createTooltipMarkdown(
+        "GLM Usage Monitor",
+        `请求失败：${this.error}`,
+        ["点击打开面板"],
+        "warning",
+      );
     }
 
     if (this.isLoading) {
-      return "GLM Usage Monitor\n正在加载使用量数据...";
+      return this.createTooltipMarkdown(
+        "GLM Usage Monitor",
+        "正在加载使用量数据...",
+      );
     }
 
     if (!this.currentSummary) {
-      return "GLM Usage Monitor - 未配置凭证\n点击进行配置";
+      return this.createTooltipMarkdown(
+        "GLM Usage Monitor",
+        "未配置凭证",
+        ["点击打开面板进行配置"],
+      );
     }
 
     const { tokenUsage, mcpUsage, tokenResetAt, mcpResetAt } =
@@ -209,22 +247,38 @@ export class StatusBarManager {
         })
       : "未知";
 
-    return [
+    const topModel =
+      this.currentSummary.modelUsageDetails?.totalUsage?.modelSummaryList
+        ?.slice()
+        .sort((a, b) => b.totalTokens - a.totalTokens)[0];
+    const totalToolCalls =
+      (this.currentSummary.mcpToolCalls?.totalNetworkSearchCount ?? 0) +
+      (this.currentSummary.mcpToolCalls?.totalWebReadMcpCount ?? 0) +
+      (this.currentSummary.mcpToolCalls?.totalZreadMcpCount ?? 0) +
+      (this.currentSummary.mcpToolCalls?.totalSearchMcpCount ?? 0);
+
+    const lines = [
+      `范围：**${getUsageRangeLabel(this.currentRange)}**`,
       "",
-      "🔹 Token 配额",
-      `   已用: ${tokenUsage.percentage.toFixed(1)}%`,
-      `   重置: ${tokenResetTime}`,
+      `Token 配额： 已用 **${tokenUsage.percentage.toFixed(1)}%** `,
+      `MCP   配额： 已用 **${mcpUsage.percentage.toFixed(1)}%** `,
       "",
-      " MCP 配额",
-      `   已用: ${mcpUsage.percentage.toFixed(1)}%`,
-      `   重置: ${mcpResetTime}`,
+      `Token 重置：${tokenResetTime}`,
+      `MCP 重置：${mcpResetTime}`,
       "",
-      this.getDominantPercentage() >= 80
-        ? "⚠️ 用量接近限制，请注意控制使用"
-        : "✅ 用量正常",
+      `模型调用：${this.currentSummary.modelUsageDetails?.totalUsage?.totalModelCallCount?.toLocaleString("zh-CN") ?? "--"}`,
+      `工具调用：${totalToolCalls.toLocaleString("zh-CN")}`,
+      `主力模型：${topModel?.modelName ?? "暂无明细"}`,
       "",
-      "点击查看详情",
-    ].join("\n");
+      "点击打开面板",
+    ];
+
+    return this.createTooltipMarkdown(
+      "GLM Usage Monitor",
+      this.getHealthLabel(this.getDominantPercentage()),
+      lines,
+      this.getDominantPercentage() >= 80 ? "warning" : "info",
+    );
   }
 
   /**
@@ -234,6 +288,39 @@ export class StatusBarManager {
     this.statusBarItem.text = this.getText();
     this.statusBarItem.tooltip = this.getTooltip();
     this.statusBarItem.color = this.getColor();
+  }
+
+  private getHealthLabel(percentage: number): string {
+    if (percentage >= 95) {
+      return "高风险";
+    }
+    if (percentage >= 80) {
+      return "需关注";
+    }
+    if (percentage >= 50) {
+      return "正常偏高";
+    }
+    return "状态正常";
+  }
+
+  private createTooltipMarkdown(
+    title: string,
+    summary: string,
+    lines: string[] = [],
+    tone: "info" | "warning" = "info",
+  ): vscode.MarkdownString {
+    const icon = tone === "warning" ? "$(warning)" : "$(pulse)";
+    const markdown = new vscode.MarkdownString(undefined, true);
+    markdown.isTrusted = false;
+    markdown.supportThemeIcons = true;
+    markdown.appendMarkdown(`### ${icon} ${title}\n\n`);
+    markdown.appendMarkdown(`${summary}\n\n`);
+
+    if (lines.length > 0) {
+      markdown.appendMarkdown(lines.join("  \n"));
+    }
+
+    return markdown;
   }
 
   /**

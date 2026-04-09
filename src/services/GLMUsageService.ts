@@ -4,9 +4,12 @@ import {
   ApiConfig,
   DetailedUsageSnapshot,
   ModelUsageData,
+  ModelSummaryItem,
   QuotaLimit,
   QuotaLimitResponse,
   QuotaSummary,
+  ToolDetailItem,
+  ToolSummaryItem,
   ToolUsageData,
   UsageMetricSummary,
   UsageRange,
@@ -211,34 +214,27 @@ export class GLMUsageService {
         });
         res.on("end", () => {
           if (res.statusCode !== 200) {
-            let errorMsg = `HTTP ${res.statusCode}`;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.message || parsed.error) {
-                errorMsg += `: ${parsed.message || parsed.error}`;
-              }
-            } catch {
-              if (data) {
-                errorMsg += `: ${data.substring(0, 200)}`;
-              }
-            }
-            return reject(new Error(errorMsg));
+            const userFriendlyError = this.getUserFriendlyError(
+              res.statusCode,
+              data,
+            );
+            return reject(new Error(userFriendlyError));
           }
           try {
             resolve(JSON.parse(data));
           } catch (e) {
-            reject(new Error(`Failed to parse response: ${e}`));
+            reject(new Error("无法解析服务器响应，请稍后重试"));
           }
         });
       });
 
       req.on("error", (error) => {
-        reject(new Error(`Request failed: ${error.message}`));
+        reject(new Error(`网络请求失败: ${error.message}`));
       });
 
       req.setTimeout(10000, () => {
         req.destroy();
-        reject(new Error("Request timeout after 10 seconds"));
+        reject(new Error("请求超时，请检查网络连接或稍后重试"));
       });
 
       req.end();
@@ -254,60 +250,130 @@ export class GLMUsageService {
     toolUsage: UsageResponse,
   ): QuotaSummary {
     const baseSummary = this.parseQuotaSummary(quotaLimits);
+    const modelUsageDetails = this.extractModelUsageDetails(modelUsage);
 
     // Parse model usage data
-    const consumedTokens = this.extractConsumedTokens(modelUsage);
+    const consumedTokens = modelUsageDetails?.totalUsage?.totalTokensUsage;
 
     // Parse tool usage data
-    const mcpToolCalls = this.extractMcpToolCalls(toolUsage);
+    const toolUsageDetails = this.extractToolUsageDetails(toolUsage);
+    const mcpToolCalls = this.extractMcpToolCalls(toolUsageDetails);
 
     return {
       ...baseSummary,
       consumedTokens,
+      modelUsageDetails,
       mcpToolCalls,
+      toolUsageDetails,
     };
   }
 
   /**
-   * Extract consumed tokens from model usage response
+   * Extract model usage details from response
    */
-  private extractConsumedTokens(modelUsage: UsageResponse): number | undefined {
+  private extractModelUsageDetails(
+    modelUsage: UsageResponse,
+  ): ModelUsageData | undefined {
     if (!modelUsage || !modelUsage.data) {
       return undefined;
     }
 
-    // Handle wrapped response structure: { code: 200, data: { totalUsage: {...} } }
-    let actualData: ModelUsageData | undefined;
-    if (typeof modelUsage.data === "object") {
-      const wrapper = modelUsage.data as Record<string, unknown>;
-      if (wrapper.totalUsage && typeof wrapper.totalUsage === "object") {
-        actualData = wrapper as unknown as ModelUsageData;
-      }
+    if (typeof modelUsage.data !== "object") {
+      return undefined;
     }
 
-    return actualData?.totalUsage?.totalTokensUsage;
+    const wrapper = modelUsage.data as Record<string, unknown>;
+    if (!wrapper.totalUsage || typeof wrapper.totalUsage !== "object") {
+      return undefined;
+    }
+
+    const totalUsage = wrapper.totalUsage as Record<string, unknown>;
+    const modelSummaryList = Array.isArray(totalUsage.modelSummaryList)
+      ? totalUsage.modelSummaryList
+          .filter((item): item is ModelSummaryItem =>
+            Boolean(item && typeof item === "object"),
+          )
+          .map((item) => ({
+            modelName: String(item.modelName ?? ""),
+            totalTokens: Number(item.totalTokens ?? 0),
+            sortOrder: Number(item.sortOrder ?? 0),
+          }))
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+      : undefined;
+
+    return {
+      totalUsage: {
+        totalModelCallCount: Number(totalUsage.totalModelCallCount ?? 0),
+        totalTokensUsage: Number(totalUsage.totalTokensUsage ?? 0),
+        modelSummaryList,
+      },
+    };
   }
 
   /**
-   * Extract MCP tool calls from tool usage response
+   * Extract tool usage details from response
    */
-  private extractMcpToolCalls(
+  private extractToolUsageDetails(
     toolUsage: UsageResponse,
-  ): QuotaSummary["mcpToolCalls"] {
+  ): ToolUsageData | undefined {
     if (!toolUsage || !toolUsage.data) {
       return undefined;
     }
 
-    // Handle wrapped response structure: { code: 200, data: { totalUsage: {...} } }
-    let actualData: ToolUsageData | undefined;
-    if (typeof toolUsage.data === "object") {
-      const wrapper = toolUsage.data as Record<string, unknown>;
-      if (wrapper.totalUsage && typeof wrapper.totalUsage === "object") {
-        actualData = wrapper as unknown as ToolUsageData;
-      }
+    if (typeof toolUsage.data !== "object") {
+      return undefined;
     }
 
-    const totalUsage = actualData?.totalUsage;
+    const wrapper = toolUsage.data as Record<string, unknown>;
+    if (!wrapper.totalUsage || typeof wrapper.totalUsage !== "object") {
+      return undefined;
+    }
+
+    const totalUsage = wrapper.totalUsage as Record<string, unknown>;
+    const toolDetails = Array.isArray(totalUsage.toolDetails)
+      ? totalUsage.toolDetails
+          .filter((item): item is ToolDetailItem =>
+            Boolean(item && typeof item === "object"),
+          )
+          .map((item) => ({
+            modelName: String(item.modelName ?? ""),
+            totalUsageCount: Number(item.totalUsageCount ?? 0),
+          }))
+      : undefined;
+
+    const toolSummaryList = Array.isArray(totalUsage.toolSummaryList)
+      ? totalUsage.toolSummaryList
+          .filter((item): item is ToolSummaryItem =>
+            Boolean(item && typeof item === "object"),
+          )
+          .map((item) => ({
+            toolCode: String(item.toolCode ?? ""),
+            toolName: String(item.toolName ?? ""),
+            totalUsageCount: Number(item.totalUsageCount ?? 0),
+            sortOrder: Number(item.sortOrder ?? 0),
+          }))
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+      : undefined;
+
+    return {
+      totalUsage: {
+        totalNetworkSearchCount: Number(totalUsage.totalNetworkSearchCount ?? 0),
+        totalWebReadMcpCount: Number(totalUsage.totalWebReadMcpCount ?? 0),
+        totalZreadMcpCount: Number(totalUsage.totalZreadMcpCount ?? 0),
+        totalSearchMcpCount: Number(totalUsage.totalSearchMcpCount ?? 0),
+        toolDetails,
+        toolSummaryList,
+      },
+    };
+  }
+
+  /**
+   * Extract MCP tool calls from tool usage details
+   */
+  private extractMcpToolCalls(
+    toolUsage?: ToolUsageData,
+  ): QuotaSummary["mcpToolCalls"] {
+    const totalUsage = toolUsage?.totalUsage;
     if (!totalUsage) {
       return undefined;
     }
@@ -665,6 +731,45 @@ export class GLMUsageService {
     return 0;
   }
 
+  /**
+   * Convert HTTP error to user-friendly message
+   */
+  private getUserFriendlyError(statusCode: number | undefined, data: string): string {
+    const errorMessages: Record<number, string> = {
+      400: "请求参数错误，请检查配置",
+      401: "凭证无效或已过期，请检查 API Token",
+      403: "没有权限访问该资源",
+      404: "API 端点不存在，请检查 Base URL 配置",
+      429: "请求过于频繁，请稍后再试",
+      500: "服务器内部错误，请稍后重试",
+      502: "网关错误，服务器可能正在维护",
+      503: "服务暂时不可用，请稍后重试",
+    };
+
+    if (statusCode && errorMessages[statusCode]) {
+      return errorMessages[statusCode];
+    }
+
+    // Try to parse error message from response
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed.message) {
+        return `请求失败: ${parsed.message}`;
+      }
+      if (parsed.error) {
+        return `请求失败: ${parsed.error}`;
+      }
+    } catch {
+      // Ignore parse error
+    }
+
+    if (statusCode) {
+      return `请求失败 (HTTP ${statusCode})，请稍后重试`;
+    }
+
+    return "请求失败，请检查网络连接后重试";
+  }
+
   private extractNumericField(obj: QuotaLimit, fieldNames: string[]): number {
     for (const field of fieldNames) {
       const value = (obj as unknown as Record<string, unknown>)[field];
@@ -677,6 +782,7 @@ export class GLMUsageService {
     }
     return 0;
   }
+
 }
 
 type UsageResponseItem = {

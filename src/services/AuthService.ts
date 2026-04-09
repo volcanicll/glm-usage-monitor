@@ -12,6 +12,13 @@ interface ClaudeSettings {
     };
 }
 
+export type CredentialSource = 'claude' | 'env' | 'manual' | null;
+
+export interface CredentialsWithSource {
+    creds: ApiConfig;
+    source: CredentialSource;
+}
+
 export class AuthService {
     constructor(
         private secretStorage: vscode.SecretStorage,
@@ -25,10 +32,18 @@ export class AuthService {
      * 3. Stored secret/config values (manual configuration)
      */
     async getCredentials(): Promise<ApiConfig | null> {
+        const result = await this.getCredentialsWithSource();
+        return result?.creds ?? null;
+    }
+
+    /**
+     * Get credentials with source information
+     */
+    async getCredentialsWithSource(): Promise<CredentialsWithSource | null> {
         // 1. Try Claude Code settings.json first
         const claudeCredentials = await this.getCredentialsFromClaudeSettings();
         if (claudeCredentials) {
-            return claudeCredentials;
+            return { creds: claudeCredentials, source: 'claude' };
         }
 
         // 2. Try VSCode process environment variables
@@ -36,7 +51,7 @@ export class AuthService {
         const envBaseUrl = process.env.ANTHROPIC_BASE_URL;
 
         if (envToken && envBaseUrl) {
-            return { authToken: envToken, baseUrl: envBaseUrl };
+            return { creds: { authToken: envToken, baseUrl: envBaseUrl }, source: 'env' };
         }
 
         // 3. Try stored credentials (manual configuration)
@@ -44,7 +59,7 @@ export class AuthService {
         const storedBaseUrl = this.config.get<string>('baseUrl');
 
         if (storedToken && storedBaseUrl) {
-            return { authToken: storedToken, baseUrl: storedBaseUrl };
+            return { creds: { authToken: storedToken, baseUrl: storedBaseUrl }, source: 'manual' };
         }
 
         return null;
@@ -117,7 +132,7 @@ export class AuthService {
         // 2. Check process environment variables
         const envToken = process.env.ANTHROPIC_AUTH_TOKEN;
         const envBaseUrl = process.env.ANTHROPIC_BASE_URL;
-        debug.push(`进程环境变量: ANTHROPIC_AUTH_TOKEN=${envToken ? '已设置' : '未设置'}, ANTHROPIC_BASE_URL=${envBaseUrl ? '已设置' : '未设置'}`);
+        debug.push(`进程环境变量: ANTHROPIC_AUTH_TOKEN=${envToken ? '已设置 (已隐藏)' : '未设置'}, ANTHROPIC_BASE_URL=${envBaseUrl ? '已设置' : '未设置'}`);
 
         if (envToken && envBaseUrl) {
             return { creds: { authToken: envToken, baseUrl: envBaseUrl }, debug };
@@ -126,7 +141,7 @@ export class AuthService {
         // 3. Check stored credentials
         const storedToken = await this.secretStorage.get('authToken');
         const storedBaseUrl = this.config.get<string>('baseUrl');
-        debug.push(`手动配置的凭证: authToken=${storedToken ? '已设置' : '未设置'}, baseUrl=${storedBaseUrl || '未设置'}`);
+        debug.push(`手动配置的凭证: authToken=${storedToken ? '已设置 (已隐藏)' : '未设置'}, baseUrl=${storedBaseUrl || '未设置'}`);
 
         if (storedToken && storedBaseUrl) {
             return { creds: { authToken: storedToken, baseUrl: storedBaseUrl }, debug };

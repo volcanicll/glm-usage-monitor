@@ -27,26 +27,43 @@ export interface UsageResponse {
     success?: boolean;
 }
 
+export interface ModelSummaryItem {
+  modelName: string;
+  totalTokens: number;
+  sortOrder: number;
+}
+
 /** Model usage response data */
 export interface ModelUsageData {
-    totalUsage: {
-        totalModelCallCount: number;
-        totalTokensUsage: number;
-    };
+  totalUsage: {
+    totalModelCallCount: number;
+    totalTokensUsage: number;
+    modelSummaryList?: ModelSummaryItem[];
+  };
+}
+
+export interface ToolDetailItem {
+  modelName: string;
+  totalUsageCount: number;
+}
+
+export interface ToolSummaryItem {
+  toolCode: string;
+  toolName: string;
+  totalUsageCount: number;
+  sortOrder: number;
 }
 
 /** Tool usage response data */
 export interface ToolUsageData {
-    totalUsage: {
-        totalNetworkSearchCount: number;
-        totalWebReadMcpCount: number;
-        totalZreadMcpCount: number;
-        totalSearchMcpCount: number;
-        toolDetails?: Array<{
-            modelName: string;
-            totalUsageCount: number;
-        }>;
-    };
+  totalUsage: {
+    totalNetworkSearchCount: number;
+    totalWebReadMcpCount: number;
+    totalZreadMcpCount: number;
+    totalSearchMcpCount: number;
+    toolDetails?: ToolDetailItem[];
+    toolSummaryList?: ToolSummaryItem[];
+  };
 }
 
 export interface UsageData {
@@ -77,6 +94,8 @@ export interface QuotaSummary {
   monthlyResetAt: string;
   /** Token数 consumed in the query time period */
   consumedTokens?: number;
+  /** Model usage details in the query time period */
+  modelUsageDetails?: ModelUsageData;
   /** MCP tool calls in the query time period */
   mcpToolCalls?: {
     totalNetworkSearchCount: number;
@@ -84,6 +103,14 @@ export interface QuotaSummary {
     totalZreadMcpCount: number;
     totalSearchMcpCount: number;
   };
+  /** MCP tool details in the query time period */
+  toolUsageDetails?: ToolUsageData;
+  /** Credential source for display */
+  credentialSource?: "claude" | "env" | "manual";
+  /** Last refresh time */
+  lastRefreshTime?: string;
+  /** Next scheduled refresh time */
+  nextRefreshTime?: string;
 }
 
 export type UsageRange = 'today' | 'last7Days' | 'last30Days';

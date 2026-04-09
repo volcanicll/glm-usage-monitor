@@ -18,6 +18,7 @@ docs/**
 
 # Development files
 .vscode/**
+.github/**
 .claude/**
 .git/**
 

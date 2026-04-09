@@ -16,6 +16,8 @@ let thresholdNotifier: ThresholdNotifier;
 let cacheService: CacheService;
 let currentRange: UsageRange = "today";
 let summaryCache: Map<UsageRange, QuotaSummary> = new Map();
+let lastRefreshTime: Date | null = null;
+let nextRefreshTime: Date | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("glmUsage");
@@ -23,7 +25,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Initialize new services
   cacheService = new CacheService();
-  statusBarManager = new StatusBarManager();
+  const statusBarMode = config.get<"minimal" | "compact" | "detailed">(
+    "statusBarMode",
+    "detailed",
+  );
+  statusBarManager = new StatusBarManager(statusBarMode);
   usagePanel = new UsagePanel(context);
 
   // Initialize threshold notifier with config values
@@ -34,50 +40,10 @@ export async function activate(context: vscode.ExtensionContext) {
   const notificationEnabled = config.get<boolean>("notificationEnabled", true);
   thresholdNotifier = new ThresholdNotifier(thresholds, notificationEnabled);
 
-  // Check if credentials exist
+  // Check if credentials exist - use passive notification instead of modal
   const credentials = await authService.getCredentials();
   if (!credentials) {
-    statusBarManager.clear();
-
-    // Get debug information
-    const { debug } = await authService.getCredentialsWithDebug();
-    const debugMessage = debug.join("\n• ");
-
-    const action = await vscode.window.showWarningMessage(
-      `GLM Usage 未读取到可用凭证\n\n• ${debugMessage}\n\n插件会自动使用 Claude Code 配置文件中的凭证。`,
-      "手动配置",
-      "查看调试信息",
-    );
-
-    if (action === "手动配置") {
-      await showConfigurationDialog();
-    } else if (action === "查看调试信息") {
-      const outputChannel =
-        vscode.window.createOutputChannel("GLM Usage Debug");
-      outputChannel.appendLine("=== GLM Usage 凭证调试信息 ===\n");
-      debug.forEach((line) => outputChannel.appendLine(line));
-
-      outputChannel.appendLine("\n=== 凭证获取优先级 ===");
-      outputChannel.appendLine(
-        "1. Claude Code 配置文件 (~/.claude/settings.json)",
-      );
-      outputChannel.appendLine("2. VSCode 进程环境变量");
-      outputChannel.appendLine("3. 手动配置的凭证");
-
-      outputChannel.appendLine("\n=== 建议的解决方法 ===");
-      outputChannel.appendLine("方法 1 - 使用 Claude Code 配置文件（推荐）:");
-      outputChannel.appendLine(
-        "  Claude Code 会自动使用 ~/.claude/settings.json 中的凭证",
-      );
-      outputChannel.appendLine("  无需额外配置");
-      outputChannel.appendLine("");
-      outputChannel.appendLine("方法 2 - 手动配置:");
-      outputChannel.appendLine(
-        '  使用命令面板中的 "GLM Usage: Configure" 命令',
-      );
-
-      outputChannel.show();
-    }
+    statusBarManager.showNoCredentials();
   } else {
     scheduleRefresh(config);
   }
@@ -104,6 +70,9 @@ export async function activate(context: vscode.ExtensionContext) {
     async (range: UsageRange) => {
       currentRange = range;
       cacheService.clear();
+      // Show loading state immediately for better UX
+      usagePanel.showLoading();
+      statusBarManager.showLoading();
       await refreshUsage(false);
     },
   );
@@ -227,6 +196,13 @@ export async function activate(context: vscode.ExtensionContext) {
           thresholdNotifier.setThresholds(newThresholds);
           thresholdNotifier.setEnabled(newEnabled);
 
+          // Update status bar mode
+          const newMode = newConfig.get<"minimal" | "compact" | "detailed">(
+            "statusBarMode",
+            "detailed",
+          );
+          statusBarManager.setMode(newMode);
+
           scheduleRefresh(newConfig);
         } else {
           statusBarManager.clear();
@@ -238,8 +214,8 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary> {
-  const creds = await authService.getCredentials();
-  if (!creds) {
+  const credsWithSource = await authService.getCredentialsWithSource();
+  if (!credsWithSource) {
     throw new Error("未配置凭证");
   }
 
@@ -248,7 +224,7 @@ async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary> {
     .get<boolean>("cacheEnabled", true);
 
   if (!glmUsageService) {
-    glmUsageService = new GLMUsageService(creds, cacheService, cacheEnabled);
+    glmUsageService = new GLMUsageService(credsWithSource.creds, cacheService, cacheEnabled);
   }
 
   const forceRefresh = !cacheEnabled;
@@ -263,8 +239,11 @@ async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary> {
     data[1],
     data[2],
   );
-  summaryCache.set(range, summary);
-  return summary;
+  summary.credentialSource = credsWithSource.source ?? undefined;
+    summary.lastRefreshTime = lastRefreshTime?.toISOString();
+    summary.nextRefreshTime = nextRefreshTime?.toISOString();
+    summaryCache.set(range, summary);
+    return summary;
 }
 
 async function showUsagePanel(): Promise<void> {
@@ -289,6 +268,7 @@ async function showUsagePanel(): Promise<void> {
 
 async function refreshUsage(showNotification = false): Promise<void> {
   statusBarManager.showLoading();
+  usagePanel.showLoading();
 
   try {
     const summary = await fetchAndParseUsage(currentRange);
@@ -297,6 +277,14 @@ async function refreshUsage(showNotification = false): Promise<void> {
 
     // Update panel if open
     await usagePanel.update(summary, currentRange);
+
+    // Update refresh times
+    lastRefreshTime = new Date();
+    const refreshConfig = vscode.workspace.getConfiguration("glmUsage");
+    const interval = refreshConfig.get<number>("refreshInterval", 600000);
+    if (refreshConfig.get<boolean>("autoRefresh", true)) {
+      nextRefreshTime = new Date(Date.now() + interval);
+    }
 
     if (showNotification) {
       vscode.window.showInformationMessage(
@@ -358,9 +346,53 @@ async function showConfigurationDialog(): Promise<void> {
     return;
   }
 
+  // Validate credentials before saving
+  const validationProgress = vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "正在验证凭证...",
+      cancellable: false,
+    },
+    async () => {
+      try {
+        const testService = new GLMUsageService(
+          { authToken, baseUrl },
+          cacheService,
+          false,
+        );
+        await testService.fetchQuotaLimits(true);
+        return { success: true, error: null };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "验证失败",
+        };
+      }
+    },
+  );
+
+  const validation = await validationProgress;
+
+  if (!validation.success) {
+    const action = await vscode.window.showErrorMessage(
+      `凭证验证失败: ${validation.error}`,
+      "重新配置",
+      "仍要保存",
+    );
+
+    if (action === "重新配置") {
+      await showConfigurationDialog();
+      return;
+    } else if (action !== "仍要保存") {
+      return;
+    }
+  }
+
   await authService.storeCredentials(authToken, baseUrl);
   cacheService.clear();
-  vscode.window.showInformationMessage("凭证保存成功。");
+  vscode.window.showInformationMessage(
+    validation.success ? "凭证验证通过并保存成功。" : "凭证已保存（未验证）。",
+  );
 
   const config = vscode.workspace.getConfiguration("glmUsage");
   scheduleRefresh(config);

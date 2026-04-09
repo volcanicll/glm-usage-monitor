@@ -9,6 +9,9 @@ export class ThresholdNotifier {
   private enabled: boolean;
   private notifiedThresholds: Set<number> = new Set();
   private lastResetDate: string | null = null;
+  private snoozeUntil: number | null = null;
+  private snoozeAllForToday: boolean = false;
+  private lastSnoozeDate: string | null = null;
 
   constructor(thresholds: number[] = [50, 80, 95], enabled: boolean = true) {
     this.thresholds = thresholds.sort((a, b) => a - b);
@@ -35,6 +38,23 @@ export class ThresholdNotifier {
     if (currentResetDate !== this.lastResetDate) {
       this.notifiedThresholds.clear();
       this.lastResetDate = currentResetDate;
+      this.snoozeAllForToday = false;
+      this.lastSnoozeDate = null;
+    }
+
+    // Check if snooze period has expired
+    if (this.snoozeUntil && Date.now() < this.snoozeUntil) {
+      return false;
+    }
+    this.snoozeUntil = null;
+
+    // Check if snoozed for today
+    const today = new Date().toDateString();
+    if (this.snoozeAllForToday && this.lastSnoozeDate === today) {
+      return false;
+    }
+    if (this.lastSnoozeDate !== today) {
+      this.snoozeAllForToday = false;
     }
 
     // Find the highest threshold that has been reached but not yet notified
@@ -79,11 +99,25 @@ export class ThresholdNotifier {
       message = `📊 GLM ${usageType} 用量已达 ${Math.round(actualPercentage)}%`;
     }
 
-    vscode.window.showInformationMessage(message).then((selection) => {
-      if (selection) {
-        vscode.commands.executeCommand("glmUsage.showUsage");
-      }
-    });
+    vscode.window
+      .showInformationMessage(message, "查看详情", "1小时后提醒", "今日不再提醒")
+      .then((selection) => {
+        if (selection === "查看详情") {
+          vscode.commands.executeCommand("glmUsage.showUsage");
+        } else if (selection === "1小时后提醒") {
+          this.snooze(60 * 60 * 1000); // 1 hour
+        } else if (selection === "今日不再提醒") {
+          this.snoozeAllForToday = true;
+          this.lastSnoozeDate = new Date().toDateString();
+        }
+      });
+  }
+
+  /**
+   * Snooze notifications for a specified duration
+   */
+  private snooze(durationMs: number): void {
+    this.snoozeUntil = Date.now() + durationMs;
   }
 
   /**
