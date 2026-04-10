@@ -1,8 +1,11 @@
 import * as vscode from "vscode";
 import { QuotaSummary } from "../types/api";
 
+const STORAGE_KEY = "glmUsage.thresholdState";
+
 /**
  * Manages threshold-based notifications for GLM usage
+ * Persists notification state across extension reloads and window sessions
  */
 export class ThresholdNotifier {
   private thresholds: number[];
@@ -12,10 +15,64 @@ export class ThresholdNotifier {
   private snoozeUntil: number | null = null;
   private snoozeAllForToday: boolean = false;
   private lastSnoozeDate: string | null = null;
+  private context: vscode.ExtensionContext;
 
-  constructor(thresholds: number[] = [50, 80, 95], enabled: boolean = true) {
+  constructor(
+    thresholds: number[] = [50, 80, 95],
+    enabled: boolean = true,
+    context?: vscode.ExtensionContext,
+  ) {
     this.thresholds = thresholds.sort((a, b) => a - b);
     this.enabled = enabled;
+    this.context = context as vscode.ExtensionContext;
+
+    // Restore persisted state if context is available
+    if (this.context) {
+      this.restoreState();
+    }
+  }
+
+  /**
+   * Restore notification state from persistent storage
+   */
+  private restoreState(): void {
+    try {
+      const savedState = this.context.globalState.get<{
+        notifiedThresholds: number[];
+        lastResetDate: string | null;
+        snoozeUntil: number | null;
+        snoozeAllForToday: boolean;
+        lastSnoozeDate: string | null;
+      }>(STORAGE_KEY);
+
+      if (savedState) {
+        this.notifiedThresholds = new Set(savedState.notifiedThresholds || []);
+        this.lastResetDate = savedState.lastResetDate || null;
+        this.snoozeUntil = savedState.snoozeUntil || null;
+        this.snoozeAllForToday = savedState.snoozeAllForToday || false;
+        this.lastSnoozeDate = savedState.lastSnoozeDate || null;
+      }
+    } catch (error) {
+      // If restoration fails, start with fresh state
+      console.error("Failed to restore threshold state:", error);
+    }
+  }
+
+  /**
+   * Save current notification state to persistent storage
+   */
+  private saveState(): void {
+    try {
+      this.context.globalState.update(STORAGE_KEY, {
+        notifiedThresholds: Array.from(this.notifiedThresholds),
+        lastResetDate: this.lastResetDate,
+        snoozeUntil: this.snoozeUntil,
+        snoozeAllForToday: this.snoozeAllForToday,
+        lastSnoozeDate: this.lastSnoozeDate,
+      });
+    } catch (error) {
+      console.error("Failed to save threshold state:", error);
+    }
   }
 
   /**
@@ -31,22 +88,35 @@ export class ThresholdNotifier {
     );
 
     // Check if we need to reset notified thresholds (new month)
-    const currentResetDate = summary.monthlyResetAt
-      ? new Date(summary.monthlyResetAt).toDateString()
-      : null;
+    // Use token reset time (hourly) for token-based notifications
+    // Use mcp reset time (monthly) for mcp-based notifications
+    const isTokenHigher =
+      summary.tokenUsage.percentage >= summary.mcpUsage.percentage;
+    const currentResetDate = isTokenHigher
+      ? summary.tokenResetAt
+        ? new Date(summary.tokenResetAt).toDateString()
+        : new Date().toDateString()
+      : summary.mcpResetAt
+        ? new Date(summary.mcpResetAt).toDateString()
+        : new Date().toDateString();
 
     if (currentResetDate !== this.lastResetDate) {
       this.notifiedThresholds.clear();
       this.lastResetDate = currentResetDate;
       this.snoozeAllForToday = false;
       this.lastSnoozeDate = null;
+      this.saveState();
     }
 
     // Check if snooze period has expired
     if (this.snoozeUntil && Date.now() < this.snoozeUntil) {
       return false;
     }
+    const hadSnooze = this.snoozeUntil !== null;
     this.snoozeUntil = null;
+    if (hadSnooze) {
+      this.saveState();
+    }
 
     // Check if snoozed for today
     const today = new Date().toDateString();
@@ -55,6 +125,7 @@ export class ThresholdNotifier {
     }
     if (this.lastSnoozeDate !== today) {
       this.snoozeAllForToday = false;
+      this.saveState();
     }
 
     // Find the highest threshold that has been reached but not yet notified
@@ -70,6 +141,7 @@ export class ThresholdNotifier {
 
     if (triggeredThreshold !== null) {
       this.notifiedThresholds.add(triggeredThreshold);
+      this.saveState();
       this.showNotification(triggeredThreshold, dominantPercentage, summary);
       return true;
     }
@@ -118,6 +190,7 @@ export class ThresholdNotifier {
    */
   private snooze(durationMs: number): void {
     this.snoozeUntil = Date.now() + durationMs;
+    this.saveState();
   }
 
   /**
@@ -126,6 +199,7 @@ export class ThresholdNotifier {
   reset(): void {
     this.notifiedThresholds.clear();
     this.lastResetDate = null;
+    this.saveState();
   }
 
   /**

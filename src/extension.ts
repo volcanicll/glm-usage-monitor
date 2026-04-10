@@ -32,13 +32,13 @@ export async function activate(context: vscode.ExtensionContext) {
   statusBarManager = new StatusBarManager(statusBarMode);
   usagePanel = new UsagePanel(context);
 
-  // Initialize threshold notifier with config values
+  // Initialize threshold notifier with config values and context for persistence
   const thresholds = config.get<number[]>(
     "notificationThresholds",
     [50, 80, 95],
   );
   const notificationEnabled = config.get<boolean>("notificationEnabled", true);
-  thresholdNotifier = new ThresholdNotifier(thresholds, notificationEnabled);
+  thresholdNotifier = new ThresholdNotifier(thresholds, notificationEnabled, context);
 
   // Check if credentials exist - use passive notification instead of modal
   const credentials = await authService.getCredentials();
@@ -253,7 +253,8 @@ async function showUsagePanel(): Promise<void> {
     try {
       const newSummary = await fetchAndParseUsage(currentRange);
       statusBarManager.update(newSummary, currentRange);
-      thresholdNotifier.check(newSummary);
+      // Don't show notifications when user explicitly opens the panel
+      // Only show notifications for automatic refreshes or manual refresh command
       await usagePanel.show(newSummary, currentRange);
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知错误";
@@ -266,14 +267,18 @@ async function showUsagePanel(): Promise<void> {
   await usagePanel.show(summary, currentRange);
 }
 
-async function refreshUsage(showNotification = false): Promise<void> {
+async function refreshUsage(showNotification = false, skipNotification = false): Promise<void> {
   statusBarManager.showLoading();
   usagePanel.showLoading();
 
   try {
     const summary = await fetchAndParseUsage(currentRange);
     statusBarManager.update(summary, currentRange);
-    thresholdNotifier.check(summary);
+
+    // Only check threshold notifications if not skipping (e.g., on startup)
+    if (!skipNotification) {
+      thresholdNotifier.check(summary);
+    }
 
     // Update panel if open
     await usagePanel.update(summary, currentRange);
@@ -308,12 +313,15 @@ function scheduleRefresh(config: vscode.WorkspaceConfiguration): void {
 
   if (autoRefresh) {
     refreshTimer = setInterval(() => {
-      refreshUsage(false);
+      refreshUsage(false, false);
     }, interval);
   }
 
-  // Initial refresh
-  refreshUsage(false);
+  // Delay initial refresh to avoid startup noise and notifications
+  // Skip threshold notifications on startup to avoid annoying users after reload
+  setTimeout(() => {
+    refreshUsage(false, true);
+  }, 2000); // 2 second delay
 }
 
 export function deactivate() {
