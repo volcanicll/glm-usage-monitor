@@ -111,6 +111,8 @@ export interface QuotaSummary {
   lastRefreshTime?: string;
   /** Next scheduled refresh time */
   nextRefreshTime?: string;
+  /** 是否处于离线模式（使用缓存数据） */
+  isOffline?: boolean;
 }
 
 export type UsageRange = 'today' | 'last7Days' | 'last30Days';

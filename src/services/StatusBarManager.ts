@@ -17,6 +17,7 @@ export class StatusBarManager {
   private mode: StatusBarMode = "detailed";
   private isLoading = false;
   private error: string | null = null;
+  private isOffline = false;
 
   constructor(mode: StatusBarMode = "detailed") {
     this.mode = mode;
@@ -40,6 +41,7 @@ export class StatusBarManager {
     this.currentRange = range;
     this.error = null;
     this.isLoading = false;
+    this.isOffline = false;
     this.render();
   }
 
@@ -69,6 +71,24 @@ export class StatusBarManager {
   }
 
   /**
+   * Show offline state - 显示网络离线状态
+   */
+  showOffline(): void {
+    this.isOffline = true;
+    this.error = null;
+    this.isLoading = false;
+    this.render();
+  }
+
+  /**
+   * Hide offline state
+   */
+  hideOffline(): void {
+    this.isOffline = false;
+    this.render();
+  }
+
+  /**
    * Set display mode
    */
   setMode(mode: StatusBarMode): void {
@@ -90,6 +110,7 @@ export class StatusBarManager {
     this.currentSummary = null;
     this.error = null;
     this.isLoading = false;
+    this.isOffline = false;
     this.statusBarItem.text = "$(circle-large-outline) GLM";
     this.statusBarItem.tooltip = this.createTooltipMarkdown(
       "GLM Usage Monitor",
@@ -105,6 +126,7 @@ export class StatusBarManager {
     this.currentSummary = null;
     this.error = null;
     this.isLoading = false;
+    this.isOffline = false;
     this.statusBarItem.text = "$(key) GLM 未配置";
     this.statusBarItem.tooltip = this.createTooltipMarkdown(
       "GLM Usage Monitor",
@@ -132,6 +154,9 @@ export class StatusBarManager {
    * Get status bar color based on usage percentage
    */
   private getColor(): vscode.ThemeColor | undefined {
+    if (this.isOffline) {
+      return new vscode.ThemeColor("descriptionForeground");
+    }
     const percentage = this.getDominantPercentage();
     if (percentage >= 95) {
       return new vscode.ThemeColor("errorForeground");
@@ -149,6 +174,7 @@ export class StatusBarManager {
    * Get icon based on state
    */
   private getIcon(): string {
+    if (this.isOffline) return "$(circle-slash)";
     if (this.error) return "$(error)";
     if (this.isLoading) return "$(sync~spin)";
     return "$(pulse)";
@@ -159,6 +185,15 @@ export class StatusBarManager {
    */
   private getText(): string {
     const icon = this.getIcon();
+
+    if (this.isOffline) {
+      if (this.currentSummary) {
+        const tokenPercent = Math.round(this.currentSummary.tokenUsage.percentage);
+        const mcpPercent = Math.round(this.currentSummary.mcpUsage.percentage);
+        return `${icon} GLM T ${tokenPercent}% · M ${mcpPercent}%`;
+      }
+      return `${icon} GLM 离线`;
+    }
 
     if (this.error) {
       return `${icon} GLM 错误`;
@@ -193,6 +228,61 @@ export class StatusBarManager {
    * Get tooltip content
    */
   private getTooltip(): vscode.MarkdownString {
+    if (this.isOffline) {
+      if (this.currentSummary) {
+        const { tokenUsage, mcpUsage, tokenResetAt, mcpResetAt } =
+          this.currentSummary;
+        const tokenRemaining = Math.max(0, tokenUsage.total - tokenUsage.used);
+        const mcpRemaining = Math.max(0, mcpUsage.total - mcpUsage.used);
+
+        const tokenResetTime = tokenResetAt
+          ? new Date(tokenResetAt).toLocaleString("zh-CN", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })
+          : "未知";
+
+        const mcpResetTime = mcpResetAt
+          ? new Date(mcpResetAt).toLocaleString("zh-CN", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })
+          : "未知";
+
+        const lines = [
+          `**网络离线** - 显示缓存数据`,
+          "",
+          `范围：**${getUsageRangeLabel(this.currentRange)}**`,
+          "",
+          `Token 配额： 已用 **${tokenUsage.percentage.toFixed(1)}%** `,
+          `MCP   配额： 已用 **${mcpUsage.percentage.toFixed(1)}%** `,
+          "",
+          `Token 重置：${tokenResetTime}`,
+          `MCP 重置：${mcpResetTime}`,
+          "",
+          "点击打开面板",
+        ];
+
+        return this.createTooltipMarkdown(
+          "GLM Usage Monitor",
+          "离线模式",
+          lines,
+          "warning",
+        );
+      }
+      return this.createTooltipMarkdown(
+        "GLM Usage Monitor",
+        "**网络离线** - 无缓存数据",
+        ["点击打开面板"],
+        "warning",
+      );
+    }
+
     if (this.error) {
       return this.createTooltipMarkdown(
         "GLM Usage Monitor",

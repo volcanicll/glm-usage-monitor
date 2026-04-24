@@ -213,7 +213,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(configChangeListener);
 }
 
-async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary> {
+async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary | null> {
   const credsWithSource = await authService.getCredentialsWithSource();
   if (!credsWithSource) {
     throw new Error("未配置凭证");
@@ -227,6 +227,10 @@ async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary> {
     glmUsageService = new GLMUsageService(credsWithSource.creds, cacheService, cacheEnabled);
   }
 
+  // 首先检查是否有缓存的摘要数据
+  const cachedSummary = summaryCache.get(range);
+
+  // 网络请求
   const forceRefresh = !cacheEnabled;
   const data = await Promise.all([
     glmUsageService.fetchQuotaLimits(forceRefresh),
@@ -234,16 +238,43 @@ async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary> {
     glmUsageService.fetchToolUsage(range, forceRefresh),
   ]);
 
+  // 检查网络状态
+  const networkStatus = glmUsageService.getNetworkStatus();
+  const hasAnyData = data.some(d => d !== null);
+
+  // 如果网络请求全部失败，使用缓存数据
+  if (!hasAnyData) {
+    if (cachedSummary) {
+      // 有缓存数据，返回缓存并标记为离线
+      cachedSummary.isOffline = true;
+      return cachedSummary;
+    }
+    // 没有缓存数据，返回 null
+    return null;
+  }
+
+  // 至少部分数据成功，组合数据（缓存和在线数据混合）
+  const quotaLimits = data[0] ?? (cachedSummary ? { limits: [] } : null);
+  const modelUsage = data[1] ?? null;
+  const toolUsage = data[2] ?? null;
+
   const summary = glmUsageService.parseCompleteUsageData(
-    data[0],
-    data[1],
-    data[2],
+    quotaLimits,
+    modelUsage,
+    toolUsage,
   );
+
   summary.credentialSource = credsWithSource.source ?? undefined;
-    summary.lastRefreshTime = lastRefreshTime?.toISOString();
-    summary.nextRefreshTime = nextRefreshTime?.toISOString();
-    summaryCache.set(range, summary);
-    return summary;
+  summary.lastRefreshTime = lastRefreshTime?.toISOString();
+  summary.nextRefreshTime = nextRefreshTime?.toISOString();
+
+  // 标记离线状态
+  if (!networkStatus.isOnline) {
+    summary.isOffline = true;
+  }
+
+  summaryCache.set(range, summary);
+  return summary;
 }
 
 async function showUsagePanel(): Promise<void> {
@@ -252,7 +283,21 @@ async function showUsagePanel(): Promise<void> {
     statusBarManager.showLoading();
     try {
       const newSummary = await fetchAndParseUsage(currentRange);
-      statusBarManager.update(newSummary, currentRange);
+
+      // 如果返回 null 表示完全没有数据
+      if (!newSummary) {
+        statusBarManager.showError("无法获取数据，请检查网络连接");
+        vscode.window.showErrorMessage("获取数据失败: 无法连接到服务器，且无可用缓存");
+        return;
+      }
+
+      // 检查是否离线
+      if (newSummary.isOffline) {
+        statusBarManager.showOffline();
+      } else {
+        statusBarManager.update(newSummary, currentRange);
+      }
+
       // Don't show notifications when user explicitly opens the panel
       // Only show notifications for automatic refreshes or manual refresh command
       await usagePanel.show(newSummary, currentRange);
@@ -273,33 +318,54 @@ async function refreshUsage(showNotification = false, skipNotification = false):
 
   try {
     const summary = await fetchAndParseUsage(currentRange);
-    statusBarManager.update(summary, currentRange);
 
-    // Only check threshold notifications if not skipping (e.g., on startup)
-    if (!skipNotification) {
-      thresholdNotifier.check(summary);
+    // 如果返回 null 表示完全没有数据（既没有网络也没有缓存）
+    if (!summary) {
+      statusBarManager.showError("无法获取数据，请检查网络连接");
+      return;
+    }
+
+    // 检查是否离线
+    const isOffline = (summary as any).isOffline === true;
+
+    if (isOffline) {
+      // 离线模式 - 显示缓存数据，不弹出通知
+      statusBarManager.showOffline();
+      usagePanel.showOffline();
+    } else {
+      // 在线模式 - 正常更新
+      statusBarManager.update(summary, currentRange);
+      usagePanel.hideOffline();
+
+      // Only check threshold notifications if not skipping (e.g., on startup)
+      if (!skipNotification) {
+        thresholdNotifier.check(summary);
+      }
+
+      // Update refresh times
+      lastRefreshTime = new Date();
+      const refreshConfig = vscode.workspace.getConfiguration("glmUsage");
+      const interval = refreshConfig.get<number>("refreshInterval", 600000);
+      if (refreshConfig.get<boolean>("autoRefresh", true)) {
+        nextRefreshTime = new Date(Date.now() + interval);
+      }
+
+      if (showNotification) {
+        vscode.window.showInformationMessage(
+          `GLM Usage: Token ${Math.round(summary.tokenUsage.percentage)}% | MCP ${Math.round(summary.mcpUsage.percentage)}%`,
+        );
+      }
     }
 
     // Update panel if open
     await usagePanel.update(summary, currentRange);
-
-    // Update refresh times
-    lastRefreshTime = new Date();
-    const refreshConfig = vscode.workspace.getConfiguration("glmUsage");
-    const interval = refreshConfig.get<number>("refreshInterval", 600000);
-    if (refreshConfig.get<boolean>("autoRefresh", true)) {
-      nextRefreshTime = new Date(Date.now() + interval);
-    }
-
-    if (showNotification) {
-      vscode.window.showInformationMessage(
-        `GLM Usage: Token ${Math.round(summary.tokenUsage.percentage)}% | MCP ${Math.round(summary.mcpUsage.percentage)}%`,
-      );
-    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "未知错误";
+    // 只有在用户主动刷新时才显示错误通知
+    if (showNotification) {
+      vscode.window.showErrorMessage(`GLM 使用量获取失败: ${message}`);
+    }
     statusBarManager.showError(message);
-    vscode.window.showErrorMessage(`GLM 使用量获取失败: ${message}`);
   }
 }
 

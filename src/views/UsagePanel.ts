@@ -10,6 +10,7 @@ export class UsagePanel {
   private currentSummary: QuotaSummary | null = null;
   private currentRange: UsageRange = "today";
   private isLoading = false;
+  private isOffline = false;
 
   constructor(private context: vscode.ExtensionContext) {}
 
@@ -69,6 +70,8 @@ export class UsagePanel {
     this.currentSummary = summary;
     this.currentRange = range;
     this.isLoading = false;
+    // 从 summary 中读取离线状态
+    this.isOffline = summary.isOffline === true;
 
     if (!this.panel) {
       return;
@@ -79,8 +82,24 @@ export class UsagePanel {
 
   showLoading(): void {
     this.isLoading = true;
+    this.isOffline = false;
     if (this.panel) {
       this.panel.webview.html = this.getLoadingHtml();
+    }
+  }
+
+  showOffline(): void {
+    this.isOffline = true;
+    this.isLoading = false;
+    if (this.panel) {
+      this.panel.webview.html = this.getHtml();
+    }
+  }
+
+  hideOffline(): void {
+    this.isOffline = false;
+    if (this.panel) {
+      this.panel.webview.html = this.getHtml();
     }
   }
 
@@ -338,6 +357,10 @@ export class UsagePanel {
       background: var(--accent-soft);
       color: var(--accent-strong);
       white-space: nowrap;
+    }
+    .pill.offline-badge {
+      background: rgba(245, 158, 11, 0.15);
+      color: #d97706;
     }
     .stats-grid {
       display: grid;
@@ -623,6 +646,7 @@ export class UsagePanel {
       <div class="badge-row">
         <span class="pill">${getUsageRangeLabel(this.currentRange)}</span>
         <span class="pill">${this.getHealthLabel(dominantPercent)}</span>
+        ${this.isOffline ? '<span class="pill offline-badge">⚡ 离线缓存</span>' : ""}
       </div>
     </div>
     <div class="stats-grid">
@@ -851,6 +875,10 @@ export class UsagePanel {
 
   private getRefreshInfoHtml(summary: QuotaSummary): string {
     const parts: string[] = [];
+
+    if (this.isOffline) {
+      parts.push("⚡ 离线模式 - 显示缓存数据");
+    }
 
     if (summary.lastRefreshTime) {
       const lastRefresh = new Date(summary.lastRefreshTime);

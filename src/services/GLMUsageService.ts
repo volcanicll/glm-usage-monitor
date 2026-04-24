@@ -23,6 +23,8 @@ import {
 
 export class GLMUsageService {
   private cache: CacheService;
+  private isOnline = true;
+  private lastNetworkError: string | null = null;
 
   constructor(
     private config: ApiConfig,
@@ -33,20 +35,36 @@ export class GLMUsageService {
   }
 
   /**
+   * 获取当前网络状态
+   */
+  getNetworkStatus(): { isOnline: boolean; error: string | null } {
+    return { isOnline: this.isOnline, error: this.lastNetworkError };
+  }
+
+  /**
+   * 重置网络状态
+   */
+  resetNetworkStatus(): void {
+    this.isOnline = true;
+    this.lastNetworkError = null;
+  }
+
+  /**
    * Fetch all usage data
+   * 返回类型改为可能为 null
    */
   async fetchAllUsage(): Promise<{
-    quotaLimits: QuotaLimitResponse;
-    modelUsage: UsageResponse;
-    toolUsage: UsageResponse;
+    quotaLimits: QuotaLimitResponse | null;
+    modelUsage: UsageResponse | null;
+    toolUsage: UsageResponse | null;
   }> {
     return this.fetchUsageByRange("today");
   }
 
   async fetchUsageByRange(range: UsageRange): Promise<{
-    quotaLimits: QuotaLimitResponse;
-    modelUsage: UsageResponse;
-    toolUsage: UsageResponse;
+    quotaLimits: QuotaLimitResponse | null;
+    modelUsage: UsageResponse | null;
+    toolUsage: UsageResponse | null;
   }> {
     const [quotaLimits, modelUsage, toolUsage] = await Promise.all([
       this.fetchQuotaLimits(),
@@ -59,59 +77,88 @@ export class GLMUsageService {
 
   /**
    * Fetch quota limits with optional caching
+   * 失败时返回缓存数据或默认值
    */
-  async fetchQuotaLimits(forceRefresh = false): Promise<QuotaLimitResponse> {
-    if (!this.cacheEnabled || forceRefresh) {
-      const url = this.getQuotaLimitUrl();
-      return this.makeRequest<QuotaLimitResponse>(url);
+  async fetchQuotaLimits(forceRefresh = false): Promise<QuotaLimitResponse | null> {
+    // 先尝试获取缓存
+    const cached = this.getCachedQuotaLimits();
+    if (cached && !forceRefresh) {
+      return cached;
     }
 
-    const cacheKey = `quota_limits`;
-    return this.cache.getOrSet<QuotaLimitResponse>(
-      cacheKey,
-      () => this.makeRequest<QuotaLimitResponse>(this.getQuotaLimitUrl()),
-      2 * 60 * 1000, // 2 minutes TTL for quota limits
-    );
+    // 网络请求
+    const result = await this.makeRequest<QuotaLimitResponse>(this.getQuotaLimitUrl());
+
+    // 请求成功，更新缓存
+    if (result !== null) {
+      if (this.cacheEnabled) {
+        this.cache.set(`quota_limits`, result, 2 * 60 * 1000);
+      }
+      return result;
+    }
+
+    // 请求失败，返回缓存
+    return cached;
   }
 
   /**
    * Fetch model usage with time window and optional caching
+   * 失败时返回缓存数据或默认值
    */
   async fetchModelUsage(
     range: UsageRange = "today",
     forceRefresh = false,
-  ): Promise<UsageResponse> {
-    if (!this.cacheEnabled || forceRefresh) {
-      const url = this.getModelUsageUrl(range);
-      return this.makeRequest<UsageResponse>(url);
+  ): Promise<UsageResponse | null> {
+    // 先尝试获取缓存
+    const cached = this.getCachedModelUsage(range);
+    if (cached && !forceRefresh) {
+      return cached;
     }
 
-    const cacheKey = `model_usage_${range}`;
-    return this.cache.getOrSet<UsageResponse>(
-      cacheKey,
-      () => this.makeRequest<UsageResponse>(this.getModelUsageUrl(range)),
-      this.getCacheTTLForRange(range),
-    );
+    // 网络请求
+    const result = await this.makeRequest<UsageResponse>(this.getModelUsageUrl(range));
+
+    // 请求成功，更新缓存
+    if (result !== null) {
+      if (this.cacheEnabled) {
+        const cacheKey = `model_usage_${range}`;
+        this.cache.set(cacheKey, result, this.getCacheTTLForRange(range));
+      }
+      return result;
+    }
+
+    // 请求失败，返回缓存
+    return cached;
   }
 
   /**
    * Fetch tool usage with time window and optional caching
+   * 失败时返回缓存数据或默认值
    */
   async fetchToolUsage(
     range: UsageRange = "today",
     forceRefresh = false,
-  ): Promise<UsageResponse> {
-    if (!this.cacheEnabled || forceRefresh) {
-      const url = this.getToolUsageUrl(range);
-      return this.makeRequest<UsageResponse>(url);
+  ): Promise<UsageResponse | null> {
+    // 先尝试获取缓存
+    const cached = this.getCachedToolUsage(range);
+    if (cached && !forceRefresh) {
+      return cached;
     }
 
-    const cacheKey = `tool_usage_${range}`;
-    return this.cache.getOrSet<UsageResponse>(
-      cacheKey,
-      () => this.makeRequest<UsageResponse>(this.getToolUsageUrl(range)),
-      this.getCacheTTLForRange(range),
-    );
+    // 网络请求
+    const result = await this.makeRequest<UsageResponse>(this.getToolUsageUrl(range));
+
+    // 请求成功，更新缓存
+    if (result !== null) {
+      if (this.cacheEnabled) {
+        const cacheKey = `tool_usage_${range}`;
+        this.cache.set(cacheKey, result, this.getCacheTTLForRange(range));
+      }
+      return result;
+    }
+
+    // 请求失败，返回缓存
+    return cached;
   }
 
   /**
@@ -189,9 +236,10 @@ export class GLMUsageService {
 
   /**
    * Make HTTPS request to GLM API
+   * 失败时返回 null，不抛出错误
    */
-  private makeRequest<T>(url: string): Promise<T> {
-    return new Promise((resolve, reject) => {
+  private async makeRequest<T>(url: string): Promise<T | null> {
+    return new Promise((resolve) => {
       const parsedUrl = new URL(url);
 
       const options = {
@@ -218,23 +266,33 @@ export class GLMUsageService {
               res.statusCode,
               data,
             );
-            return reject(new Error(userFriendlyError));
+            this.isOnline = false;
+            this.lastNetworkError = userFriendlyError;
+            return resolve(null);
           }
           try {
+            this.isOnline = true;
+            this.lastNetworkError = null;
             resolve(JSON.parse(data));
           } catch (e) {
-            reject(new Error("无法解析服务器响应，请稍后重试"));
+            this.isOnline = false;
+            this.lastNetworkError = "无法解析服务器响应";
+            resolve(null);
           }
         });
       });
 
       req.on("error", (error) => {
-        reject(new Error(`网络请求失败: ${error.message}`));
+        this.isOnline = false;
+        this.lastNetworkError = `网络请求失败: ${error.message}`;
+        resolve(null);
       });
 
       req.setTimeout(10000, () => {
         req.destroy();
-        reject(new Error("请求超时，请检查网络连接或稍后重试"));
+        this.isOnline = false;
+        this.lastNetworkError = "请求超时";
+        resolve(null);
       });
 
       req.end();
@@ -242,21 +300,56 @@ export class GLMUsageService {
   }
 
   /**
+   * 从缓存获取配额限制数据
+   */
+  getCachedQuotaLimits(): QuotaLimitResponse | null {
+    const cacheKey = `quota_limits`;
+    return this.cache.get<QuotaLimitResponse>(cacheKey);
+  }
+
+  /**
+   * 从缓存获取模型使用数据
+   */
+  getCachedModelUsage(range: UsageRange): UsageResponse | null {
+    const cacheKey = `model_usage_${range}`;
+    return this.cache.get<UsageResponse>(cacheKey);
+  }
+
+  /**
+   * 从缓存获取工具使用数据
+   */
+  getCachedToolUsage(range: UsageRange): UsageResponse | null {
+    const cacheKey = `tool_usage_${range}`;
+    return this.cache.get<UsageResponse>(cacheKey);
+  }
+
+  /**
+   * 检查是否有可用的缓存数据
+   */
+  hasCachedData(range: UsageRange = "today"): boolean {
+    return (
+      this.getCachedQuotaLimits() !== null ||
+      this.getCachedModelUsage(range) !== null ||
+      this.getCachedToolUsage(range) !== null
+    );
+  }
+
+  /**
    * Parse complete usage data including quota limits, model usage, and tool usage
    */
   parseCompleteUsageData(
-    quotaLimits: unknown,
-    modelUsage: UsageResponse,
-    toolUsage: UsageResponse,
+    quotaLimits: unknown | null,
+    modelUsage: UsageResponse | null,
+    toolUsage: UsageResponse | null,
   ): QuotaSummary {
     const baseSummary = this.parseQuotaSummary(quotaLimits);
-    const modelUsageDetails = this.extractModelUsageDetails(modelUsage);
+    const modelUsageDetails = this.extractModelUsageDetails(modelUsage ?? undefined);
 
     // Parse model usage data
     const consumedTokens = modelUsageDetails?.totalUsage?.totalTokensUsage;
 
     // Parse tool usage data
-    const toolUsageDetails = this.extractToolUsageDetails(toolUsage);
+    const toolUsageDetails = this.extractToolUsageDetails(toolUsage ?? undefined);
     const mcpToolCalls = this.extractMcpToolCalls(toolUsageDetails);
 
     return {
@@ -272,7 +365,7 @@ export class GLMUsageService {
    * Extract model usage details from response
    */
   private extractModelUsageDetails(
-    modelUsage: UsageResponse,
+    modelUsage: UsageResponse | undefined,
   ): ModelUsageData | undefined {
     if (!modelUsage || !modelUsage.data) {
       return undefined;
@@ -314,7 +407,7 @@ export class GLMUsageService {
    * Extract tool usage details from response
    */
   private extractToolUsageDetails(
-    toolUsage: UsageResponse,
+    toolUsage: UsageResponse | undefined,
   ): ToolUsageData | undefined {
     if (!toolUsage || !toolUsage.data) {
       return undefined;
@@ -472,8 +565,14 @@ export class GLMUsageService {
     };
   }
 
-  async fetchDetailedUsage(range: UsageRange): Promise<DetailedUsageSnapshot> {
+  async fetchDetailedUsage(range: UsageRange): Promise<DetailedUsageSnapshot | null> {
     const data = await this.fetchUsageByRange(range);
+
+    // 如果全部失败，返回 null
+    if (!data.quotaLimits && !data.modelUsage && !data.toolUsage) {
+      return null;
+    }
+
     const summary = this.parseQuotaSummary(data.quotaLimits);
 
     return {
@@ -487,7 +586,7 @@ export class GLMUsageService {
   }
 
   private aggregateUsage(
-    response: UsageResponse,
+    response: UsageResponse | null,
     field: "model" | "tool",
   ): UsageMetricSummary[] {
     const usageMap = new Map<string, UsageMetricSummary>();
