@@ -2,21 +2,33 @@
 
 > 在 Visual Studio Code 中直接监控您的 GLM Coding Plan 使用量
 
-![Version](https://img.shields.io/visual-studio-marketplace/v/glm-usage-monitor)
-![Installs](https://img.shields.io/visual-studio-marketplace/i/glm-usage-monitor)
-![Rating](https://img.shields.io/visual-studio-marketplace/r/glm-usage-monitor)
+## 界面预览
+
+<table>
+  <tr>
+    <td align="center"><b>详情面板</b></td>
+    <td align="center"><b>状态栏</b></td>
+     <td align="center"><b>Tooltip</b></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/detail.png" width="480" alt="详情面板"/></td>
+    <td><img src="screenshots/statusbar.png" width="480" alt="状态栏"/></td>
+    <td><img src="screenshots/tooltip.png" width="480" alt="tooltip"/></td>
+  </tr>
+</table>
 
 ## 功能特性
 
-- **配额优先监控**：优先展示 Token 配额和 MCP 配额状态，快速判断剩余空间
-- **紧凑面板设计**：面板采用更紧凑的仪表盘布局，减少滚动并提升信息密度
-- **模型统计**：支持模型调用次数与 Token 消耗排行
-- **工具统计**：支持 MCP 工具调用汇总与工具排行
-- **状态栏集成**：在状态栏中查看当前使用量摘要，并通过 tooltip 查看结构化详情
+- **环形图占比分析**：可视化展示各模型 Token 使用占比，一目了然
+- **工具使用柱状图**：以柱状图和数字卡片展示各工具调用次数
+- **Token 趋势折线图**：按模型分色展示 Token 用量随时间的变化趋势
+- **配额实时监控**：在顶部摘要条展示 Token 配额和 MCP 配额的百分比、剩余量和重置时间
+- **状态栏集成**：精简格式显示用量百分比，悬停查看详细 Tooltip
+- **离线支持**：断网时自动回退缓存数据，并显示离线标识
+- **套餐类型展示**：自动识别并显示当前套餐类型
 - **自动刷新**：可配置的自动刷新间隔（默认：10 分钟）
-- **手动刷新**：快速刷新命令获取最新数据
-- **安全凭证存储**：API 密钥安全存储在 VSCode 的 secret storage 中
-- **时间窗口分析**：支持自定义时间窗口查看使用量数据（今日、近7天、近30天）
+- **时间窗口分析**：支持今日、近 7 天、近 30 天三种时间范围
+- **安全凭证存储**：API 密钥安全存储在 VS Code 的 secret storage 中
 - **自动配置**：自动读取 Claude Code 配置文件中的凭证
 
 ## 系统要求
@@ -47,32 +59,52 @@
 
 2. **查看使用量**
    - 点击状态栏项目或运行 "Show GLM Usage Panel" 命令
-   - 查看配额状态、模型统计和工具统计
+   - 查看配额状态、模型占比、工具统计和用量趋势
 
 ## 面板说明
 
-- **配额状态**：展示 Token 配额和 MCP 配额的已用比例、剩余空间和重置时间
-- **模型统计**：展示模型调用次数、Token 消耗和模型排行
-- **工具统计**：展示工具调用汇总和工具排行
-- **状态栏 Tooltip**：悬停即可查看当前时间范围、配额状态、重置时间和调用摘要
+面板由以下区域组成：
+
+| 区域         | 说明                                                            |
+| ------------ | --------------------------------------------------------------- |
+| 顶部摘要条   | Token / MCP 配额百分比、剩余量、重置时间，离线时显示离线标识    |
+| 模型使用占比 | 环形图展示各模型 Token 占比，下方图例列出模型名称、用量和百分比 |
+| 工具使用统计 | 彩色标签 + 柱状图展示各工具调用次数，底部数字卡片强化数据对比   |
+| Token 趋势   | 按模型分色的折线图，支持 hourly/daily 粒度自适应                |
+| 套餐标签     | 标题旁显示当前套餐类型                                          |
+
+### 状态栏
+
+状态栏显示当前用量百分比，格式为 `T{token}% · M{mcp}%`。颜色随用量变化：
+
+- 绿色：< 80%
+- 黄色：80% - 95%
+- 红色：≥ 95%
+
+悬停状态栏可查看详细 Tooltip，包含配额、重置时间、调用统计和主力模型。
 
 ## 命令
 
-| 命令 | 描述 |
-|---------|-------------|
-| `glmUsage.showUsage` | 显示 GLM 使用量面板 |
-| `glmUsage.refresh` | 刷新使用量数据 |
-| `glmUsage.configure` | 配置 API 凭证 |
+| 命令                        | 描述                  |
+| --------------------------- | --------------------- |
+| `glmUsage.showUsage`        | 显示 GLM 使用量面板   |
+| `glmUsage.refresh`          | 刷新使用量数据        |
+| `glmUsage.changeRange`      | 切换时间范围          |
+| `glmUsage.configure`        | 配置 API 凭证         |
 | `glmUsage.clearCredentials` | 清除已存储的 API 凭证 |
-| `glmUsage.diagnose` | 诊断凭证配置 |
+| `glmUsage.diagnose`         | 诊断凭证配置          |
 
 ## 设置
 
-| 设置 | 类型 | 默认值 | 描述 |
-|---------|------|---------|-------------|
-| `glmUsage.baseUrl` | string | `https://api.z.ai/api/anthropic` | GLM API 基础 URL |
-| `glmUsage.refreshInterval` | number | `600000` | 自动刷新间隔（毫秒） |
-| `glmUsage.autoRefresh` | boolean | `true` | 启用/禁用自动刷新 |
+| 设置                              | 类型     | 默认值                           | 描述                                     |
+| --------------------------------- | -------- | -------------------------------- | ---------------------------------------- |
+| `glmUsage.baseUrl`                | string   | `https://api.z.ai/api/anthropic` | GLM API 基础 URL                         |
+| `glmUsage.refreshInterval`        | number   | `600000`                         | 自动刷新间隔（毫秒）                     |
+| `glmUsage.autoRefresh`            | boolean  | `true`                           | 启用/禁用自动刷新                        |
+| `glmUsage.statusBarMode`          | string   | `detailed`                       | 状态栏模式：minimal / compact / detailed |
+| `glmUsage.cacheEnabled`           | boolean  | `true`                           | 启用/禁用数据缓存                        |
+| `glmUsage.notificationThresholds` | number[] | `[50, 80, 95]`                   | 用量阈值提醒百分比                       |
+| `glmUsage.notificationEnabled`    | boolean  | `true`                           | 启用/禁用用量阈值提醒                    |
 
 ## 凭证配置优先级
 

@@ -1,22 +1,32 @@
 # Extension Screenshots
 
-This directory should contain screenshots for the VSCode Marketplace listing.
+## 截图说明
 
-## Required Screenshots
+### detail.png
+详情面板截图，展示主要功能区域：
+- 顶部：标题栏（含套餐类型标签）、时间范围切换（今日/近7天/近30天）、刷新按钮
+- 配额摘要条：Token 配额和 MCP 配额的百分比、剩余量、重置时间
+- 左侧卡片：模型使用占比环形图 + 模型图例列表
+- 右侧卡片：工具使用统计柱状图 + 调用次数卡片
+- 底部：Token 用量趋势折线图（按模型分色展示）
 
-1. **overview.png** - Main extension overview showing the status bar and usage panel
-2. **usage-panel.png** - Close-up of the usage panel with data
+### statusbar.png
+状态栏截图，展示底部状态栏的使用量显示：
+- 精简显示格式：`图标 T{token}% · M{mcp}%`
+- 根据用量百分比自动变色（绿色 < 80%，黄色 80-95%，红色 ≥ 95%）
 
-## How to Capture Screenshots
+### tooltip.png
+状态栏 Tooltip 截图，展示悬停时的详细信息：
+- 套餐状态标签
+- Token 和 MCP 配额百分比及重置时间
+- 当前查询范围
+- 模型调用总数和工具调用总数
+- 主力模型名称
 
-1. Install and run the extension in VSCode
-2. Use VSCode's built-in screenshot feature or system screenshot tool
-3. Capture at 1280x720 or 1920x1080 resolution
-4. Save as PNG files in this directory
+## 拍摄指南
 
-## Screenshot Guidelines
-
-- Show the extension in use with realistic data
-- Ensure UI elements are clearly visible
-- Use a clean, minimal VSCode theme
-- Avoid displaying personal API keys or sensitive information
+1. 安装并运行扩展，确保有真实数据展示
+2. 使用 VS Code 截图或系统截图工具
+3. 建议分辨率：1280x720 或 1920x1080
+4. 使用简洁的 VS Code 主题
+5. 避免展示个人 API 密钥等敏感信息

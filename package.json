@@ -2,7 +2,7 @@
   "name": "glm-usage-monitor",
   "displayName": "GLM Usage Monitor",
   "description": "在 VS Code 中监控您的 GLM Coding Plan 使用量",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "volcanic",
   "icon": "resources/icon-256.png",
   "repository": {

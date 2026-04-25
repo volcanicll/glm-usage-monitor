@@ -188,39 +188,36 @@ export class StatusBarManager {
 
     if (this.isOffline) {
       if (this.currentSummary) {
-        const tokenPercent = Math.round(this.currentSummary.tokenUsage.percentage);
-        const mcpPercent = Math.round(this.currentSummary.mcpUsage.percentage);
-        return `${icon} GLM T ${tokenPercent}% · M ${mcpPercent}%`;
+        const tp = Math.round(this.currentSummary.tokenUsage.percentage);
+        const mp = Math.round(this.currentSummary.mcpUsage.percentage);
+        return `${icon} T${tp}% M${mp}%`;
       }
-      return `${icon} GLM 离线`;
+      return `${icon} 离线`;
     }
 
     if (this.error) {
-      return `${icon} GLM 错误`;
+      return `${icon} 错误`;
     }
 
     if (this.isLoading) {
-      return `${icon} 加载中...`;
+      return `${icon} ...`;
     }
 
     if (!this.currentSummary) {
       return `${icon} GLM`;
     }
 
-    const tokenPercent = Math.round(this.currentSummary.tokenUsage.percentage);
-    const mcpPercent = Math.round(this.currentSummary.mcpUsage.percentage);
-    const rangeLabel = getUsageRangeLabel(this.currentRange);
+    const tp = Math.round(this.currentSummary.tokenUsage.percentage);
+    const mp = Math.round(this.currentSummary.mcpUsage.percentage);
 
     switch (this.mode) {
       case "minimal":
-        return `${icon} GLM ${Math.max(tokenPercent, mcpPercent)}%`;
-
+        return `${icon} ${Math.max(tp, mp)}%`;
       case "compact":
-        return `${icon} T ${tokenPercent}% · M ${mcpPercent}%`;
-
+        return `${icon} T${tp}% M${mp}%`;
       case "detailed":
       default:
-        return `${icon} GLM T ${tokenPercent}% · M ${mcpPercent}%`;
+        return `${icon} T${tp}% · M${mp}%`;
     }
   }
 
@@ -232,141 +229,69 @@ export class StatusBarManager {
       if (this.currentSummary) {
         const { tokenUsage, mcpUsage, tokenResetAt, mcpResetAt } =
           this.currentSummary;
-        const tokenRemaining = Math.max(0, tokenUsage.total - tokenUsage.used);
-        const mcpRemaining = Math.max(0, mcpUsage.total - mcpUsage.used);
-
         const tokenResetTime = tokenResetAt
-          ? new Date(tokenResetAt).toLocaleString("zh-CN", {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            })
-          : "未知";
-
+          ? new Date(tokenResetAt).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+          : "--";
         const mcpResetTime = mcpResetAt
-          ? new Date(mcpResetAt).toLocaleString("zh-CN", {
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            })
-          : "未知";
-
-        const lines = [
-          `**网络离线** - 显示缓存数据`,
-          "",
-          `范围：**${getUsageRangeLabel(this.currentRange)}**`,
-          "",
-          `Token 配额： 已用 **${tokenUsage.percentage.toFixed(1)}%** `,
-          `MCP   配额： 已用 **${mcpUsage.percentage.toFixed(1)}%** `,
-          "",
-          `Token 重置：${tokenResetTime}`,
-          `MCP 重置：${mcpResetTime}`,
-          "",
-          "点击打开面板",
-        ];
-
+          ? new Date(mcpResetAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+          : "--";
         return this.createTooltipMarkdown(
-          "GLM Usage Monitor",
-          "离线模式",
-          lines,
+          "GLM Usage",
+          "离线缓存",
+          [
+            `Token **${tokenUsage.percentage.toFixed(1)}%** · 重置 ${tokenResetTime}`,
+            `MCP **${mcpUsage.percentage.toFixed(1)}%** · 重置 ${mcpResetTime}`,
+            "",
+            `范围：${getUsageRangeLabel(this.currentRange)}`,
+            "点击打开面板",
+          ],
           "warning",
         );
       }
-      return this.createTooltipMarkdown(
-        "GLM Usage Monitor",
-        "**网络离线** - 无缓存数据",
-        ["点击打开面板"],
-        "warning",
-      );
+      return this.createTooltipMarkdown("GLM Usage", "离线 · 无缓存", ["点击打开面板"], "warning");
     }
 
     if (this.error) {
-      return this.createTooltipMarkdown(
-        "GLM Usage Monitor",
-        `请求失败：${this.error}`,
-        ["点击打开面板"],
-        "warning",
-      );
+      return this.createTooltipMarkdown("GLM Usage", `错误：${this.error}`, ["点击打开面板"], "warning");
     }
 
     if (this.isLoading) {
-      return this.createTooltipMarkdown(
-        "GLM Usage Monitor",
-        "正在加载使用量数据...",
-      );
+      return this.createTooltipMarkdown("GLM Usage", "加载中...");
     }
 
     if (!this.currentSummary) {
-      return this.createTooltipMarkdown(
-        "GLM Usage Monitor",
-        "未配置凭证",
-        ["点击打开面板进行配置"],
-      );
+      return this.createTooltipMarkdown("GLM Usage", "未配置凭证", ["点击配置"]);
     }
 
-    const { tokenUsage, mcpUsage, tokenResetAt, mcpResetAt } =
-      this.currentSummary;
-    const tokenRemaining = Math.max(0, tokenUsage.total - tokenUsage.used);
-    const mcpRemaining = Math.max(0, mcpUsage.total - mcpUsage.used);
-
-    // Token resets hourly (HH:mm format)
+    const { tokenUsage, mcpUsage, tokenResetAt, mcpResetAt } = this.currentSummary;
     const tokenResetTime = tokenResetAt
-      ? new Date(tokenResetAt).toLocaleString("zh-CN", {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        })
-      : new Date().toLocaleString("zh-CN", {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        });
-
-    // MCP resets monthly (YYYY-MM-DD HH:mm format)
+      ? new Date(tokenResetAt).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+      : "--";
     const mcpResetTime = mcpResetAt
-      ? new Date(mcpResetAt).toLocaleString("zh-CN", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        })
-      : "未知";
+      ? new Date(mcpResetAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+      : "--";
 
-    const topModel =
-      this.currentSummary.modelUsageDetails?.totalUsage?.modelSummaryList
-        ?.slice()
-        .sort((a, b) => b.totalTokens - a.totalTokens)[0];
+    const topModel = this.currentSummary.modelUsageDetails?.totalUsage?.modelSummaryList
+      ?.slice().sort((a, b) => b.totalTokens - a.totalTokens)[0];
     const totalToolCalls =
       (this.currentSummary.mcpToolCalls?.totalNetworkSearchCount ?? 0) +
       (this.currentSummary.mcpToolCalls?.totalWebReadMcpCount ?? 0) +
       (this.currentSummary.mcpToolCalls?.totalZreadMcpCount ?? 0) +
       (this.currentSummary.mcpToolCalls?.totalSearchMcpCount ?? 0);
 
-    const lines = [
-      `范围：**${getUsageRangeLabel(this.currentRange)}**`,
-      "",
-      `Token 配额： 已用 **${tokenUsage.percentage.toFixed(1)}%** `,
-      `MCP   配额： 已用 **${mcpUsage.percentage.toFixed(1)}%** `,
-      "",
-      `Token 重置：${tokenResetTime}`,
-      `MCP 重置：${mcpResetTime}`,
-      "",
-      `模型调用：${this.currentSummary.modelUsageDetails?.totalUsage?.totalModelCallCount?.toLocaleString("zh-CN") ?? "--"}`,
-      `工具调用：${totalToolCalls.toLocaleString("zh-CN")}`,
-      `主力模型：${topModel?.modelName ?? "暂无明细"}`,
-      "",
-      "点击打开面板",
-    ];
-
     return this.createTooltipMarkdown(
-      "GLM Usage Monitor",
+      "GLM Usage",
       this.getHealthLabel(this.getDominantPercentage()),
-      lines,
+      [
+        `Token **${tokenUsage.percentage.toFixed(1)}%** · 重置 ${tokenResetTime}`,
+        `MCP **${mcpUsage.percentage.toFixed(1)}%** · 重置 ${mcpResetTime}`,
+        "",
+        `范围：${getUsageRangeLabel(this.currentRange)}`,
+        `模型 ${this.currentSummary.modelUsageDetails?.totalUsage?.totalModelCallCount?.toLocaleString("zh-CN") ?? "--"} · 工具 ${totalToolCalls.toLocaleString("zh-CN")}`,
+        topModel ? `主力：${topModel.modelName}` : "",
+        "",
+        "点击打开面板",
+      ],
       this.getDominantPercentage() >= 80 ? "warning" : "info",
     );
   }

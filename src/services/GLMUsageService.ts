@@ -3,6 +3,8 @@ import { CacheService } from "../core/CacheService";
 import {
   ApiConfig,
   DetailedUsageSnapshot,
+  ModelTimeSeries,
+  ModelTimeSeriesItem,
   ModelUsageData,
   ModelSummaryItem,
   QuotaLimit,
@@ -352,13 +354,60 @@ export class GLMUsageService {
     const toolUsageDetails = this.extractToolUsageDetails(toolUsage ?? undefined);
     const mcpToolCalls = this.extractMcpToolCalls(toolUsageDetails);
 
+    // 提取模型时序数据用于折线图
+    const modelTimeSeries = this.extractModelTimeSeries(modelUsage ?? undefined);
+
     return {
       ...baseSummary,
       consumedTokens,
       modelUsageDetails,
       mcpToolCalls,
       toolUsageDetails,
+      modelTimeSeries,
     };
+  }
+
+  /**
+   * 提取模型 token 用量时序数据
+   */
+  private extractModelTimeSeries(
+    modelUsage: UsageResponse | undefined,
+  ): ModelTimeSeries | undefined {
+    if (!modelUsage?.data || typeof modelUsage.data !== "object") {
+      return undefined;
+    }
+    const d = modelUsage.data as Record<string, unknown>;
+    const xTime = Array.isArray(d.x_time)
+      ? d.x_time.map((t: unknown) => String(t))
+      : undefined;
+    if (!xTime || xTime.length === 0) return undefined;
+
+    const totalTokensUsage = Array.isArray(d.tokensUsage)
+      ? d.tokensUsage.map((v: unknown) => Number(v) || 0)
+      : new Array(xTime.length).fill(0);
+
+    const granularity =
+      d.granularity === "hourly" || d.granularity === "daily"
+        ? d.granularity
+        : "daily";
+
+    const models: ModelTimeSeriesItem[] = [];
+    if (Array.isArray(d.modelDataList)) {
+      for (const m of d.modelDataList) {
+        if (!m || typeof m !== "object") continue;
+        const item = m as Record<string, unknown>;
+        const tokensUsage = Array.isArray(item.tokensUsage)
+          ? item.tokensUsage.map((v: unknown) => Number(v) || 0)
+          : [];
+        models.push({
+          modelName: String(item.modelName ?? ""),
+          tokensUsage,
+          totalTokens: Number(item.totalTokens ?? 0),
+        });
+      }
+    }
+
+    return { xTime, granularity, totalTokensUsage, models };
   }
 
   /**
@@ -561,7 +610,8 @@ export class GLMUsageService {
       },
       tokenResetAt,
       mcpResetAt,
-      monthlyResetAt: mcpResetAt, // Keep for backward compatibility
+      monthlyResetAt: mcpResetAt,
+      level: actualResponse.level || undefined,
     };
   }
 
