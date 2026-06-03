@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { CacheService } from "./core/CacheService";
 import { AuthService } from "./services/AuthService";
 import { GLMUsageService } from "./services/GLMUsageService";
@@ -124,8 +126,6 @@ export async function activate(context: vscode.ExtensionContext) {
       outputChannel.appendLine(`VSCode Version: ${vscode.version}`);
 
       outputChannel.appendLine("\n=== Claude Code 配置文件状态 ===");
-      const fs = require("fs");
-      const path = require("path");
       const settingsPath = path.join(
         process.env.HOME || "",
         ".claude",
@@ -326,7 +326,7 @@ async function refreshUsage(showNotification = false, skipNotification = false):
     }
 
     // 检查是否离线
-    const isOffline = (summary as any).isOffline === true;
+    const isOffline = summary.isOffline === true;
 
     if (isOffline) {
       // 离线模式 - 显示缓存数据，不弹出通知
@@ -393,81 +393,90 @@ function scheduleRefresh(config: vscode.WorkspaceConfiguration): void {
 export function deactivate() {
   if (refreshTimer) {
     clearInterval(refreshTimer);
+    refreshTimer = undefined;
   }
+  // 释放所有资源，防止内存泄漏
   usagePanel.dispose();
   statusBarManager.dispose();
+  cacheService.clear();
+  summaryCache.clear();
+  lastRefreshTime = null;
+  nextRefreshTime = null;
 }
 
 async function showConfigurationDialog(): Promise<void> {
-  const authToken = await vscode.window.showInputBox({
-    prompt: "输入 GLM API Auth Token",
-    placeHolder: "sk-...",
-    password: true,
-    ignoreFocusOut: true,
-  });
+  // 使用循环代替递归，防止调用栈溢出
+  while (true) {
+    const authToken = await vscode.window.showInputBox({
+      prompt: "输入 GLM API Auth Token",
+      placeHolder: "sk-...",
+      password: true,
+      ignoreFocusOut: true,
+    });
 
-  if (!authToken) {
-    return;
-  }
-
-  const baseUrl = await vscode.window.showInputBox({
-    prompt: "输入 GLM API Base URL",
-    value: "https://api.z.ai/api/anthropic",
-    ignoreFocusOut: true,
-  });
-
-  if (!baseUrl) {
-    return;
-  }
-
-  // Validate credentials before saving
-  const validationProgress = vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "正在验证凭证...",
-      cancellable: false,
-    },
-    async () => {
-      try {
-        const testService = new GLMUsageService(
-          { authToken, baseUrl },
-          cacheService,
-          false,
-        );
-        await testService.fetchQuotaLimits(true);
-        return { success: true, error: null };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "验证失败",
-        };
-      }
-    },
-  );
-
-  const validation = await validationProgress;
-
-  if (!validation.success) {
-    const action = await vscode.window.showErrorMessage(
-      `凭证验证失败: ${validation.error}`,
-      "重新配置",
-      "仍要保存",
-    );
-
-    if (action === "重新配置") {
-      await showConfigurationDialog();
-      return;
-    } else if (action !== "仍要保存") {
+    if (!authToken) {
       return;
     }
+
+    const baseUrl = await vscode.window.showInputBox({
+      prompt: "输入 GLM API Base URL",
+      value: "https://api.z.ai/api/anthropic",
+      ignoreFocusOut: true,
+    });
+
+    if (!baseUrl) {
+      return;
+    }
+
+    // Validate credentials before saving
+    const validationProgress = vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "正在验证凭证...",
+        cancellable: false,
+      },
+      async () => {
+        try {
+          const testService = new GLMUsageService(
+            { authToken, baseUrl },
+            cacheService,
+            false,
+          );
+          await testService.fetchQuotaLimits(true);
+          return { success: true, error: null };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : "验证失败",
+          };
+        }
+      },
+    );
+
+    const validation = await validationProgress;
+
+    if (!validation.success) {
+      const action = await vscode.window.showErrorMessage(
+        `凭证验证失败: ${validation.error}`,
+        "重新配置",
+        "仍要保存",
+      );
+
+      if (action === "重新配置") {
+        continue; // 继续循环而非递归
+      } else if (action !== "仍要保存") {
+        return;
+      }
+    }
+
+    await authService.storeCredentials(authToken, baseUrl);
+    cacheService.clear();
+    vscode.window.showInformationMessage(
+      validation.success ? "凭证验证通过并保存成功。" : "凭证已保存（未验证）。",
+    );
+
+    const config = vscode.workspace.getConfiguration("glmUsage");
+    scheduleRefresh(config);
+    return;
   }
-
-  await authService.storeCredentials(authToken, baseUrl);
-  cacheService.clear();
-  vscode.window.showInformationMessage(
-    validation.success ? "凭证验证通过并保存成功。" : "凭证已保存（未验证）。",
-  );
-
-  const config = vscode.workspace.getConfiguration("glmUsage");
-  scheduleRefresh(config);
 }

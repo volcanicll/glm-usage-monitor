@@ -246,7 +246,7 @@ export class GLMUsageService {
 
       const options = {
         hostname: parsedUrl.hostname,
-        port: 443,
+        port: parsedUrl.port || 443,
         path: parsedUrl.pathname + parsedUrl.search,
         method: "GET",
         headers: {
@@ -258,9 +258,14 @@ export class GLMUsageService {
 
       const req = https.request(options, (res) => {
         let data = "";
+        // 限制响应体最大大小为 5MB，防止 OOM
+        const MAX_RESPONSE_SIZE = 5 * 1024 * 1024;
 
         res.on("data", (chunk) => {
           data += chunk;
+          if (data.length > MAX_RESPONSE_SIZE) {
+            req.destroy(new Error("响应数据过大"));
+          }
         });
         res.on("end", () => {
           if (res.statusCode !== 200) {
@@ -678,25 +683,22 @@ export class GLMUsageService {
    * Extract Token reset time (hourly reset)
    */
   private extractTokenResetTime(tokenLimit: QuotaLimit | undefined): string {
-    if (tokenLimit?.nextResetTime) {
-      const timestamp = this.toNumber(tokenLimit.nextResetTime);
-      if (timestamp > 0) {
-        const date = new Date(timestamp);
-        if (!Number.isNaN(date.getTime())) {
-          return date.toISOString();
-        }
-      }
-    }
-
-    return getNextMonthlyResetTime();
+    return this.extractResetTimeFromLimit(tokenLimit);
   }
 
   /**
    * Extract MCP reset time (monthly reset)
    */
   private extractMcpResetTime(timeLimit: QuotaLimit | undefined): string {
-    if (timeLimit?.nextResetTime) {
-      const timestamp = this.toNumber(timeLimit.nextResetTime);
+    return this.extractResetTimeFromLimit(timeLimit);
+  }
+
+  /**
+   * 通用方法：从配额限制中提取重置时间
+   */
+  private extractResetTimeFromLimit(limit: QuotaLimit | undefined): string {
+    if (limit?.nextResetTime) {
+      const timestamp = this.toNumber(limit.nextResetTime);
       if (timestamp > 0) {
         const date = new Date(timestamp);
         if (!Number.isNaN(date.getTime())) {

@@ -181,6 +181,7 @@ export class ThresholdNotifier {
         } else if (selection === "今日不再提醒") {
           this.snoozeAllForToday = true;
           this.lastSnoozeDate = new Date().toDateString();
+          this.saveState();
         }
       });
   }

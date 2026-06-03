@@ -67,19 +67,27 @@ export class AuthService {
 
     /**
      * Read credentials from Claude Code settings.json
+     * 使用异步文件读取，避免阻塞 VSCode 主线程
      */
     private async getCredentialsFromClaudeSettings(): Promise<ApiConfig | null> {
         try {
             const homeDir = os.homedir();
             const settingsPath = path.join(homeDir, '.claude', 'settings.json');
 
-            // Check if file exists
-            if (!fs.existsSync(settingsPath)) {
+            // 异步检查文件是否存在
+            const { stat } = fs.promises;
+            try {
+                await stat(settingsPath);
+            } catch {
                 return null;
             }
 
-            // Read and parse the file
-            const content = fs.readFileSync(settingsPath, 'utf-8');
+            // 异步读取和解析文件，限制大小为 1MB
+            const content = await fs.promises.readFile(settingsPath, 'utf-8');
+            if (content.length > 1024 * 1024) {
+                console.debug('Claude settings file too large, skipping');
+                return null;
+            }
             const settings: ClaudeSettings = JSON.parse(content);
 
             // Extract credentials from env section

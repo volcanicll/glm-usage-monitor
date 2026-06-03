@@ -59,6 +59,11 @@
         "command": "glmUsage.diagnose",
         "title": "诊断 GLM 使用量凭证",
         "icon": "$(search)"
+      },
+      {
+        "command": "glmUsage.changeRange",
+        "title": "切换 GLM 使用量时间范围",
+        "icon": "$(calendar)"
       }
     ],
     "configuration": {
