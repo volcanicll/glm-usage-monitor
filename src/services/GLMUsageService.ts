@@ -27,6 +27,12 @@ export class GLMUsageService {
   private cache: CacheService;
   private isOnline = true;
   private lastNetworkError: string | null = null;
+  // keep-alive Agent 复用 TCP 连接，避免每次请求重新 TLS 握手
+  private static readonly agent = new https.Agent({
+    keepAlive: true,
+    maxSockets: 6,
+    keepAliveMsecs: 30000,
+  });
 
   constructor(
     private config: ApiConfig,
@@ -249,6 +255,7 @@ export class GLMUsageService {
         port: parsedUrl.port || 443,
         path: parsedUrl.pathname + parsedUrl.search,
         method: "GET",
+        agent: GLMUsageService.agent,
         headers: {
           Authorization: this.config.authToken,
           "Accept-Language": "en-US,en",
@@ -257,17 +264,21 @@ export class GLMUsageService {
       };
 
       const req = https.request(options, (res) => {
-        let data = "";
+        // 使用 Buffer 收集数据，避免字符串拼接的频繁 GC
+        const chunks: Buffer[] = [];
+        let totalSize = 0;
         // 限制响应体最大大小为 5MB，防止 OOM
         const MAX_RESPONSE_SIZE = 5 * 1024 * 1024;
 
-        res.on("data", (chunk) => {
-          data += chunk;
-          if (data.length > MAX_RESPONSE_SIZE) {
+        res.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+          totalSize += chunk.length;
+          if (totalSize > MAX_RESPONSE_SIZE) {
             req.destroy(new Error("响应数据过大"));
           }
         });
         res.on("end", () => {
+          const data = Buffer.concat(chunks).toString("utf-8");
           if (res.statusCode !== 200) {
             const userFriendlyError = this.getUserFriendlyError(
               res.statusCode,

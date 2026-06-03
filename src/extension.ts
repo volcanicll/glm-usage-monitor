@@ -20,6 +20,9 @@ let currentRange: UsageRange = "today";
 let summaryCache: Map<UsageRange, QuotaSummary> = new Map();
 let lastRefreshTime: Date | null = null;
 let nextRefreshTime: Date | null = null;
+let isRefreshing = false; // 刷新锁，防止并发请求
+let retryTimer: NodeJS.Timeout | undefined; // 失败重试定时器
+let isWindowVisible = true; // 窗口可见状态
 
 export async function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("glmUsage");
@@ -71,9 +74,18 @@ export async function activate(context: vscode.ExtensionContext) {
     "glmUsage.changeRange",
     async (range: UsageRange) => {
       currentRange = range;
-      cacheService.clear();
-      // Show loading state immediately for better UX
-      usagePanel.showLoading();
+      // 只清除目标范围的缓存，保留其他范围的数据
+      cacheService.delete(`model_usage_${range}`);
+      cacheService.delete(`tool_usage_${range}`);
+      summaryCache.delete(range);
+
+      // 如果有该范围的缓存数据，先显示缓存，后台刷新后无感更新
+      const cachedSummary = summaryCache.get(range);
+      if (cachedSummary) {
+        await usagePanel.show(cachedSummary, range);
+      } else {
+        usagePanel.showLoading();
+      }
       statusBarManager.showLoading();
       await refreshUsage(false);
     },
@@ -211,6 +223,16 @@ export async function activate(context: vscode.ExtensionContext) {
     },
   );
   context.subscriptions.push(configChangeListener);
+
+  // 窗口状态感知：不可见时跳过刷新，重新获得焦点时立即刷新
+  const windowStateListener = vscode.window.onDidChangeWindowState((state) => {
+    isWindowVisible = state.focused;
+    if (state.focused) {
+      // 窗口重新获得焦点时立即刷新数据
+      refreshUsage(false, false);
+    }
+  });
+  context.subscriptions.push(windowStateListener);
 }
 
 async function fetchAndParseUsage(range: UsageRange): Promise<QuotaSummary | null> {
@@ -313,6 +335,16 @@ async function showUsagePanel(): Promise<void> {
 }
 
 async function refreshUsage(showNotification = false, skipNotification = false): Promise<void> {
+  // 防止并发刷新
+  if (isRefreshing) return;
+  isRefreshing = true;
+
+  // 清除重试定时器
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+  }
+
   statusBarManager.showLoading();
   usagePanel.showLoading();
 
@@ -322,6 +354,8 @@ async function refreshUsage(showNotification = false, skipNotification = false):
     // 如果返回 null 表示完全没有数据（既没有网络也没有缓存）
     if (!summary) {
       statusBarManager.showError("无法获取数据，请检查网络连接");
+      // 安排 30 秒后自动重试
+      scheduleRetry(30000);
       return;
     }
 
@@ -366,6 +400,10 @@ async function refreshUsage(showNotification = false, skipNotification = false):
       vscode.window.showErrorMessage(`GLM 使用量获取失败: ${message}`);
     }
     statusBarManager.showError(message);
+    // 刷新失败后 30 秒自动重试
+    scheduleRetry(30000);
+  } finally {
+    isRefreshing = false;
   }
 }
 
@@ -379,21 +417,39 @@ function scheduleRefresh(config: vscode.WorkspaceConfiguration): void {
 
   if (autoRefresh) {
     refreshTimer = setInterval(() => {
+      // 窗口不可见时跳过刷新，节省资源
+      if (!isWindowVisible) return;
       refreshUsage(false, false);
     }, interval);
   }
 
-  // Delay initial refresh to avoid startup noise and notifications
-  // Skip threshold notifications on startup to avoid annoying users after reload
+  // 立即显示加载状态（消除 2 秒空白期），然后延迟发起请求
+  statusBarManager.showLoading();
   setTimeout(() => {
     refreshUsage(false, true);
-  }, 2000); // 2 second delay
+  }, 2000);
+}
+
+/**
+ * 刷新失败后安排自动重试
+ */
+function scheduleRetry(delayMs: number): void {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+  }
+  retryTimer = setTimeout(() => {
+    refreshUsage(false, true);
+  }, delayMs);
 }
 
 export function deactivate() {
   if (refreshTimer) {
     clearInterval(refreshTimer);
     refreshTimer = undefined;
+  }
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
   }
   // 释放所有资源，防止内存泄漏
   usagePanel.dispose();
@@ -402,6 +458,7 @@ export function deactivate() {
   summaryCache.clear();
   lastRefreshTime = null;
   nextRefreshTime = null;
+  isRefreshing = false;
 }
 
 async function showConfigurationDialog(): Promise<void> {

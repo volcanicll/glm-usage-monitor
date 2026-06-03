@@ -101,8 +101,9 @@
 | `glmUsage.baseUrl`                | string   | `https://api.z.ai/api/anthropic` | GLM API 基础 URL                         |
 | `glmUsage.refreshInterval`        | number   | `600000`                         | 自动刷新间隔（毫秒）                     |
 | `glmUsage.autoRefresh`            | boolean  | `true`                           | 启用/禁用自动刷新                        |
-| `glmUsage.statusBarMode`          | string   | `detailed`                       | 状态栏模式：minimal / compact / detailed |
 | `glmUsage.cacheEnabled`           | boolean  | `true`                           | 启用/禁用数据缓存                        |
+| `glmUsage.cacheTTL`               | number   | `300`                            | 缓存有效期（秒）                         |
+| `glmUsage.statusBarMode`          | string   | `detailed`                       | 状态栏模式：minimal / compact / detailed |
 | `glmUsage.notificationThresholds` | number[] | `[50, 80, 95]`                   | 用量阈值提醒百分比                       |
 | `glmUsage.notificationEnabled`    | boolean  | `true`                           | 启用/禁用用量阈值提醒                    |
 

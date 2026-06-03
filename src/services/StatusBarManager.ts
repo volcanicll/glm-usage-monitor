@@ -18,6 +18,9 @@ export class StatusBarManager {
   private isLoading = false;
   private error: string | null = null;
   private isOffline = false;
+  // 预计算的缓存值，避免每次 render 都重新计算
+  private cachedTopModel: string = "";
+  private cachedTotalToolCalls: number = 0;
 
   constructor(mode: StatusBarMode = "detailed") {
     this.mode = mode;
@@ -42,6 +45,14 @@ export class StatusBarManager {
     this.error = null;
     this.isLoading = false;
     this.isOffline = false;
+    // 预计算 topModel 和 totalToolCalls，避免每次 render 重复计算
+    this.cachedTopModel = summary.modelUsageDetails?.totalUsage?.modelSummaryList
+      ?.slice().sort((a, b) => b.totalTokens - a.totalTokens)[0]?.modelName ?? "";
+    this.cachedTotalToolCalls =
+      (summary.mcpToolCalls?.totalNetworkSearchCount ?? 0) +
+      (summary.mcpToolCalls?.totalWebReadMcpCount ?? 0) +
+      (summary.mcpToolCalls?.totalZreadMcpCount ?? 0) +
+      (summary.mcpToolCalls?.totalSearchMcpCount ?? 0);
     this.render();
   }
 
@@ -271,14 +282,6 @@ export class StatusBarManager {
       ? new Date(mcpResetAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
       : "--";
 
-    const topModel = this.currentSummary.modelUsageDetails?.totalUsage?.modelSummaryList
-      ?.slice().sort((a, b) => b.totalTokens - a.totalTokens)[0];
-    const totalToolCalls =
-      (this.currentSummary.mcpToolCalls?.totalNetworkSearchCount ?? 0) +
-      (this.currentSummary.mcpToolCalls?.totalWebReadMcpCount ?? 0) +
-      (this.currentSummary.mcpToolCalls?.totalZreadMcpCount ?? 0) +
-      (this.currentSummary.mcpToolCalls?.totalSearchMcpCount ?? 0);
-
     return this.createTooltipMarkdown(
       "GLM Usage",
       this.getHealthLabel(this.getDominantPercentage()),
@@ -287,8 +290,8 @@ export class StatusBarManager {
         `MCP **${mcpUsage.percentage.toFixed(1)}%** · 重置 ${mcpResetTime}`,
         "",
         `范围：${getUsageRangeLabel(this.currentRange)}`,
-        `模型 ${this.currentSummary.modelUsageDetails?.totalUsage?.totalModelCallCount?.toLocaleString("zh-CN") ?? "--"} · 工具 ${totalToolCalls.toLocaleString("zh-CN")}`,
-        topModel ? `主力：${topModel.modelName}` : "",
+        `模型 ${this.currentSummary.modelUsageDetails?.totalUsage?.totalModelCallCount?.toLocaleString("zh-CN") ?? "--"} · 工具 ${this.cachedTotalToolCalls.toLocaleString("zh-CN")}`,
+        this.cachedTopModel ? `主力：${this.cachedTopModel}` : "",
         "",
         "点击打开面板",
       ],

@@ -326,7 +326,10 @@ export class UsagePanel {
     color:var(--fg);background:var(--bg);
     font-size:12px;line-height:1.5;padding:16px;
     max-height:100vh;overflow-y:auto;
+    animation:fadeIn .25s ease-out;
   }
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  @media(prefers-reduced-motion:reduce){body{animation:none}}
 
   /* 头部 */
   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
@@ -478,9 +481,11 @@ export class UsagePanel {
 
   <div class="card">
     <div class="card-title">工具使用统计</div>
+    ${totalToolCalls > 0 ? `
     <div class="tool-tags">${toolTags}</div>
     <div class="bar-chart">${barRows}</div>
     <div class="count-grid">${countCards}</div>
+    ` : '<div style="color:var(--muted);text-align:center;padding:24px 0">暂无工具使用数据</div>'}
   </div>
 </div>
 
@@ -579,10 +584,13 @@ ${this.generateLineChartSection(summary)}
       }
     }
 
-    // 每个模型一条线
-    const lines = models
+    // 预先排序并缓存，避免折线和图例各做一次 filter+sort
+    const sortedModels = models
       .filter((m) => m.totalTokens > 0)
-      .sort((a, b) => b.totalTokens - a.totalTokens)
+      .sort((a, b) => b.totalTokens - a.totalTokens);
+
+    // 每个模型一条线
+    const lines = sortedModels
       .map((m, idx) => {
         const color = CHART_COLORS[idx % CHART_COLORS.length];
         const points = m.tokensUsage
@@ -596,10 +604,8 @@ ${this.generateLineChartSection(summary)}
       })
       .join("\n");
 
-    // 图例
-    const legendItems = models
-      .filter((m) => m.totalTokens > 0)
-      .sort((a, b) => b.totalTokens - a.totalTokens)
+    // 图例（复用 sortedModels）
+    const legendItems = sortedModels
       .map((m, idx) => {
         const color = CHART_COLORS[idx % CHART_COLORS.length];
         return `<span class="trend-legend-item"><span class="trend-legend-dot" style="background:${color}"></span>${this.escapeHtml(m.modelName)}</span>`;
