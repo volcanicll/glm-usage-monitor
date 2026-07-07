@@ -1,19 +1,12 @@
 import * as vscode from "vscode";
 import { QuotaSummary, UsageRange } from "../types/api";
 import { getUsageRangeLabel } from "../util/timeWindow";
-
-const CHART_COLORS = [
-  "#6366f1",
-  "#f59e0b",
-  "#10b981",
-  "#3b82f6",
-  "#8b5cf6",
-  "#ec4899",
-  "#14b8a6",
-  "#f97316",
-  "#64748b",
-  "#84cc16",
-];
+import {
+  CHART_COLORS,
+  escapeHtml,
+  formatTokenCount,
+  getProgressColor,
+} from "./panelUtils";
 
 /**
  * 管理详情面板，展示模型占比环形图 + 工具使用柱状图
@@ -226,7 +219,7 @@ export class UsagePanel {
     }));
 
     const totalConsumed = summary.consumedTokens
-      ? this.formatTokenCount(summary.consumedTokens)
+      ? formatTokenCount(summary.consumedTokens)
       : "--";
 
     const donutSvg = this.generateDonutSvg(
@@ -240,8 +233,8 @@ export class UsagePanel {
         (d) => `
       <div class="legend-item">
         <span class="legend-dot" style="background:${d.color}"></span>
-        <span class="legend-name">${this.escapeHtml(d.name)}</span>
-        <span class="legend-value">${this.formatTokenCount(d.tokens)}</span>
+        <span class="legend-name">${escapeHtml(d.name)}</span>
+        <span class="legend-value">${formatTokenCount(d.tokens)}</span>
         <span class="legend-pct">${d.percent}%</span>
       </div>`,
       )
@@ -466,7 +459,7 @@ export class UsagePanel {
 <body>
 
 <div class="header">
-  <div class="title">GLM 套餐${levelText ? ` <span class="level-badge">${this.escapeHtml(levelText)}</span>` : ""}</div>
+  <div class="title">GLM 套餐${levelText ? ` <span class="level-badge">${escapeHtml(levelText)}</span>` : ""}</div>
   <div class="header-right">
     <div class="tabs">
       ${ranges.map((r) => `<div class="tab ${r === this.currentRange ? "active" : ""}" onclick="changeRange('${r}')">${getUsageRangeLabel(r)}</div>`).join("")}
@@ -478,21 +471,21 @@ export class UsagePanel {
 <div class="quota-bar">
   <div class="quota-item">
     <span class="quota-dot token"></span>
-    Token <span class="quota-pct" style="color:${this.getProgressColor(tokenPercent)}">${tokenPercent}%</span>
+    Token <span class="quota-pct" style="color:${getProgressColor(tokenPercent)}">${tokenPercent}%</span>
     <span class="quota-meta">剩余 ${tokenRemaining.toLocaleString("zh-CN")} · 重置 ${tokenResetTime}</span>
   </div>
   ${
     weekly
       ? `<div class="quota-item">
     <span class="quota-dot weekly"></span>
-    周额度 <span class="quota-pct" style="color:${this.getProgressColor(weeklyPercent)}">${weeklyPercent}%</span>
+    周额度 <span class="quota-pct" style="color:${getProgressColor(weeklyPercent)}">${weeklyPercent}%</span>
     <span class="quota-meta"> 重置 ${weeklyResetTime}</span>
   </div>`
       : ""
   }
   <div class="quota-item">
     <span class="quota-dot mcp"></span>
-    MCP <span class="quota-pct" style="color:${this.getProgressColor(mcpPercent)}">${mcpPercent}%</span>
+    MCP <span class="quota-pct" style="color:${getProgressColor(mcpPercent)}">${mcpPercent}%</span>
     <span class="quota-meta">剩余 ${mcpRemaining.toLocaleString("zh-CN")} · 重置 ${mcpResetTime}</span>
   </div>
   ${this.isOffline ? '<span class="offline-badge">⚡ 离线缓存</span>' : ""}
@@ -594,7 +587,7 @@ ${this.generateLineChartSection(summary)}
       const v = (niceMax / yTicks) * i;
       const y = yScale(v);
       yAxisSvg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--border)" stroke-width="0.5"/>`;
-      yAxisSvg += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="var(--muted)" font-size="9">${this.formatTokenCount(v)}</text>`;
+      yAxisSvg += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="var(--muted)" font-size="9">${formatTokenCount(v)}</text>`;
     }
 
     // X 轴标签：密集时旋转避免重叠
@@ -638,7 +631,7 @@ ${this.generateLineChartSection(summary)}
     const legendItems = sortedModels
       .map((m, idx) => {
         const color = CHART_COLORS[idx % CHART_COLORS.length];
-        return `<span class="trend-legend-item"><span class="trend-legend-dot" style="background:${color}"></span>${this.escapeHtml(m.modelName)}</span>`;
+        return `<span class="trend-legend-item"><span class="trend-legend-dot" style="background:${color}"></span>${escapeHtml(m.modelName)}</span>`;
       })
       .join("");
 
@@ -691,28 +684,6 @@ ${this.generateLineChartSection(summary)}
     return parts.length > 0
       ? parts.join(" · ")
       : `更新于 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
-  }
-
-  private getProgressColor(pct: number): string {
-    if (pct >= 95) return "#d05d5d";
-    if (pct >= 80) return "#d9a441";
-    return "#10b981";
-  }
-
-  private formatTokenCount(v: number): string {
-    if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-    return v.toString();
-  }
-
-  private escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
   }
 
   dispose(): void {
