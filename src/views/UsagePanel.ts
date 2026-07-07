@@ -5,6 +5,7 @@ import {
   CHART_COLORS,
   escapeHtml,
   formatTokenCount,
+  getIcon,
   getProgressColor,
   getRelativeTime,
 } from "./panelUtils";
@@ -122,15 +123,15 @@ export class UsagePanel {
     centerValue: string,
     centerLabel: string,
   ): string {
-    const radius = 68;
+    const radius = 76;
     const sw = 18;
     const C = 2 * Math.PI * radius;
     const total = models.reduce((s, m) => s + m.tokens, 0);
     if (total === 0) {
       return `<svg viewBox="0 0 200 200" class="donut-chart">
         <circle cx="100" cy="100" r="${radius}" fill="none" stroke="var(--border)" stroke-width="${sw}" opacity="0.2"/>
-        <text x="100" y="96" text-anchor="middle" class="donut-value">--</text>
-        <text x="100" y="116" text-anchor="middle" class="donut-label">${centerLabel}</text>
+        <text x="100" y="98" text-anchor="middle" class="donut-value">--</text>
+        <text x="100" y="118" text-anchor="middle" class="donut-label">${centerLabel}</text>
       </svg>`;
     }
 
@@ -152,8 +153,8 @@ export class UsagePanel {
     return `<svg viewBox="0 0 200 200" class="donut-chart">
       <circle cx="100" cy="100" r="${radius}" fill="none" stroke="var(--border)" stroke-width="${sw}" opacity="0.12"/>
       ${segments}
-      <text x="100" y="96" text-anchor="middle" class="donut-value">${centerValue}</text>
-      <text x="100" y="116" text-anchor="middle" class="donut-label">${centerLabel}</text>
+      <text x="100" y="98" text-anchor="middle" class="donut-value">${centerValue}</text>
+      <text x="100" y="118" text-anchor="middle" class="donut-label">${centerLabel}</text>
     </svg>`;
   }
 
@@ -233,10 +234,13 @@ export class UsagePanel {
       .map(
         (d) => `
       <div class="legend-item">
-        <span class="legend-dot" style="background:${d.color}"></span>
-        <span class="legend-name">${escapeHtml(d.name)}</span>
-        <span class="legend-value">${formatTokenCount(d.tokens)}</span>
-        <span class="legend-pct">${d.percent}%</span>
+        <div class="legend-head">
+          <span class="legend-dot" style="background:${d.color}"></span>
+          <span class="legend-name">${escapeHtml(d.name)}</span>
+          <span class="legend-value">${formatTokenCount(d.tokens)}</span>
+          <span class="legend-pct">${d.percent}%</span>
+        </div>
+        <div class="legend-bar"><div class="legend-bar-fill" style="width:${d.percent}%;background:${d.color}"></div></div>
       </div>`,
       )
       .join("");
@@ -426,13 +430,14 @@ export class UsagePanel {
     background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:16px;
     display:flex;flex-direction:column;
   }
-  .card-title{font-size:13px;font-weight:600;margin-bottom:12px}
+  .card-title{font-size:var(--text-md);font-weight:600;margin-bottom:var(--space-4);display:flex;align-items:center;gap:var(--space-2)}
+  .card-icon{display:inline-flex;color:var(--muted)}
 
   /* 环形图 */
   .chart-area{display:flex;justify-content:center;margin-bottom:14px}
-  .donut-chart{width:180px;height:180px}
+  .donut-chart{width:200px;height:200px}
   .donut-value{
-    font-size:22px;font-weight:700;fill:var(--fg);
+    font-size:var(--text-2xl);font-weight:700;fill:var(--fg);
     font-family:var(--vscode-font-family,sans-serif);
   }
   .donut-label{
@@ -441,12 +446,15 @@ export class UsagePanel {
   }
 
   /* 图例 */
-  .legend{display:flex;flex-direction:column;gap:6px}
-  .legend-item{display:grid;grid-template-columns:8px 1fr auto auto;gap:6px;align-items:center;font-size:11px}
+  .legend{display:flex;flex-direction:column;gap:var(--space-2)}
+  .legend-item{display:flex;flex-direction:column;gap:3px;font-size:var(--text-sm)}
+  .legend-head{display:flex;align-items:center;gap:var(--space-2)}
   .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-  .legend-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .legend-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .legend-value{color:var(--muted);text-align:right;white-space:nowrap}
   .legend-pct{font-weight:600;text-align:right;min-width:36px}
+  .legend-bar{height:3px;border-radius:2px;background:var(--surface-3);overflow:hidden}
+  .legend-bar-fill{height:100%;border-radius:2px}
 
   /* 工具标签 */
   .tool-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
@@ -536,7 +544,7 @@ export class UsagePanel {
 
 <div class="main-grid">
   <div class="card">
-    <div class="card-title">模型使用占比</div>
+    <div class="card-title"><span class="card-icon">${getIcon("donut")}</span>模型使用占比</div>
     <div class="chart-area">${donutSvg}</div>
     <div class="legend">${legendItems || '<div style="color:var(--muted)">暂无模型数据</div>'}</div>
   </div>
