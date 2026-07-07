@@ -3,6 +3,20 @@
  * 不依赖 vscode API，便于单元测试。
  */
 
+/** 图表配色（从 UsagePanel 迁移，保持视觉连续） */
+export const CHART_COLORS = [
+  "#6366f1",
+  "#f59e0b",
+  "#10b981",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#14b8a6",
+  "#f97316",
+  "#64748b",
+  "#84cc16",
+];
+
 /** Token 数量简写：1.2K / 3.4M / 1.1B */
 export function formatTokenCount(v: number): string {
   if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
@@ -49,4 +63,25 @@ export function getRelativeTime(
   if (hours < 24) return `${hours} 小时后`;
   const days = Math.floor(hours / 24);
   return `${days} 天后`;
+}
+
+/** 卡片标题内联 SVG 图标（14×14，stroke 用 currentColor 自适应主题） */
+export function getIcon(
+  name: "quota" | "donut" | "tool" | "trend",
+): string {
+  const common =
+    'width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  switch (name) {
+    case "quota":
+      return `<svg ${common}><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2v10l8 4"/></svg>`;
+    case "donut":
+      return `<svg ${common}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>`;
+    case "tool":
+      return `<svg ${common}><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.8-2.8z"/></svg>`;
+    case "trend":
+      return `<svg ${common}><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>`;
+    default:
+      throw new Error(`unknown icon: ${name}`);
+  }
 }

@@ -1,6 +1,8 @@
 import assert from "assert";
 import {
+  CHART_COLORS,
   formatTokenCount,
+  getIcon,
   getProgressColor,
   escapeHtml,
   getRelativeTime,
@@ -49,5 +51,23 @@ suite("panelUtils Tests", () => {
   test("getRelativeTime handles invalid date", () => {
     assert.strictEqual(getRelativeTime("", new Date()), "--");
     assert.strictEqual(getRelativeTime("not-a-date", new Date()), "--");
+  });
+
+  test("getIcon returns svg markup", () => {
+    const svg = getIcon("quota");
+    assert.ok(svg.startsWith("<svg"));
+    assert.ok(svg.includes("currentColor"));
+    assert.ok(svg.includes("14"));
+  });
+
+  test("getIcon throws on unknown name", () => {
+    assert.throws(() => getIcon("unknown" as never), /unknown icon/);
+  });
+
+  test("CHART_COLORS is non-empty array of hex colors", () => {
+    assert.ok(CHART_COLORS.length >= 6);
+    for (const c of CHART_COLORS) {
+      assert.ok(/^#[0-9a-f]{6}$/i.test(c), `bad color ${c}`);
+    }
   });
 });
