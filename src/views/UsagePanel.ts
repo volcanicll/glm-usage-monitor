@@ -500,12 +500,14 @@ export class UsagePanel {
     padding:16px;margin-top:14px;
   }
   .trend-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-  .trend-title{font-size:13px;font-weight:600}
+  .trend-title{font-size:var(--text-md);font-weight:600;display:flex;align-items:center;gap:var(--space-2)}
   .trend-legend{display:flex;gap:12px;flex-wrap:wrap}
   .trend-legend-item{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)}
   .trend-legend-dot{width:8px;height:3px;border-radius:1px}
   .trend-svg{width:100%;height:auto;display:block}
   .trend-svg text{font-family:var(--vscode-font-family,sans-serif)}
+  .trend-grid-line{stroke:var(--border);stroke-width:.5;stroke-dasharray:2 3}
+  .trend-point{fill:var(--bg)}
 </style>
 </head>
 <body>
@@ -638,10 +640,11 @@ ${this.generateLineChartSection(summary)}
     // Y 轴刻度
     const yTicks = 4;
     let yAxisSvg = "";
+    yAxisSvg += `<text x="${padL}" y="${padT - 4}" text-anchor="start" fill="var(--muted)" font-size="9">Token</text>`;
     for (let i = 0; i <= yTicks; i++) {
       const v = (niceMax / yTicks) * i;
       const y = yScale(v);
-      yAxisSvg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--border)" stroke-width="0.5"/>`;
+      yAxisSvg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" class="trend-grid-line"/>`;
       yAxisSvg += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="var(--muted)" font-size="9">${formatTokenCount(v)}</text>`;
     }
 
@@ -678,7 +681,16 @@ ${this.generateLineChartSection(summary)}
             return `${x},${y}`;
           })
           .join(" ");
-        return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`;
+        // 每个数据点：小圆点 + 原生 tooltip（日期 + 模型 + 数值）
+        const dots = m.tokensUsage
+          .map((v, i) => {
+            const x = padL + i * xStep;
+            const y = yScale(v);
+            const tip = `${xTime[i]} · ${m.modelName} · ${formatTokenCount(v)}`;
+            return `<circle cx="${x}" cy="${y}" r="2.5" fill="${color}" stroke="var(--bg)" stroke-width="1"><title>${tip}</title></circle>`;
+          })
+          .join("");
+        return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>${dots}`;
       })
       .join("\n");
 
@@ -698,7 +710,7 @@ ${this.generateLineChartSection(summary)}
 
     return `<div class="trend-card">
       <div class="trend-header">
-        <div class="trend-title">Token 用量趋势</div>
+        <div class="trend-title"><span class="card-icon">${getIcon("trend")}</span>Token 用量趋势</div>
         <div class="trend-legend">${legendItems}</div>
       </div>
       ${svg}
