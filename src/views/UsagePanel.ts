@@ -1,19 +1,14 @@
 import * as vscode from "vscode";
 import { QuotaSummary, UsageRange } from "../types/api";
 import { getUsageRangeLabel } from "../util/timeWindow";
-
-const CHART_COLORS = [
-  "#6366f1",
-  "#f59e0b",
-  "#10b981",
-  "#3b82f6",
-  "#8b5cf6",
-  "#ec4899",
-  "#14b8a6",
-  "#f97316",
-  "#64748b",
-  "#84cc16",
-];
+import {
+  CHART_COLORS,
+  escapeHtml,
+  formatTokenCount,
+  getIcon,
+  getProgressColor,
+  getRelativeTime,
+} from "./panelUtils";
 
 /**
  * 管理详情面板，展示模型占比环形图 + 工具使用柱状图
@@ -128,15 +123,15 @@ export class UsagePanel {
     centerValue: string,
     centerLabel: string,
   ): string {
-    const radius = 68;
+    const radius = 76;
     const sw = 18;
     const C = 2 * Math.PI * radius;
     const total = models.reduce((s, m) => s + m.tokens, 0);
     if (total === 0) {
       return `<svg viewBox="0 0 200 200" class="donut-chart">
         <circle cx="100" cy="100" r="${radius}" fill="none" stroke="var(--border)" stroke-width="${sw}" opacity="0.2"/>
-        <text x="100" y="96" text-anchor="middle" class="donut-value">--</text>
-        <text x="100" y="116" text-anchor="middle" class="donut-label">${centerLabel}</text>
+        <text x="100" y="98" text-anchor="middle" class="donut-value">--</text>
+        <text x="100" y="118" text-anchor="middle" class="donut-label">${centerLabel}</text>
       </svg>`;
     }
 
@@ -158,8 +153,8 @@ export class UsagePanel {
     return `<svg viewBox="0 0 200 200" class="donut-chart">
       <circle cx="100" cy="100" r="${radius}" fill="none" stroke="var(--border)" stroke-width="${sw}" opacity="0.12"/>
       ${segments}
-      <text x="100" y="96" text-anchor="middle" class="donut-value">${centerValue}</text>
-      <text x="100" y="116" text-anchor="middle" class="donut-label">${centerLabel}</text>
+      <text x="100" y="98" text-anchor="middle" class="donut-value">${centerValue}</text>
+      <text x="100" y="118" text-anchor="middle" class="donut-label">${centerLabel}</text>
     </svg>`;
   }
 
@@ -226,7 +221,7 @@ export class UsagePanel {
     }));
 
     const totalConsumed = summary.consumedTokens
-      ? this.formatTokenCount(summary.consumedTokens)
+      ? formatTokenCount(summary.consumedTokens)
       : "--";
 
     const donutSvg = this.generateDonutSvg(
@@ -239,10 +234,13 @@ export class UsagePanel {
       .map(
         (d) => `
       <div class="legend-item">
-        <span class="legend-dot" style="background:${d.color}"></span>
-        <span class="legend-name">${this.escapeHtml(d.name)}</span>
-        <span class="legend-value">${this.formatTokenCount(d.tokens)}</span>
-        <span class="legend-pct">${d.percent}%</span>
+        <div class="legend-head">
+          <span class="legend-dot" style="background:${d.color}"></span>
+          <span class="legend-name">${escapeHtml(d.name)}</span>
+          <span class="legend-value">${formatTokenCount(d.tokens)}</span>
+          <span class="legend-pct">${d.percent}%</span>
+        </div>
+        <div class="legend-bar"><div class="legend-bar-fill" style="width:${d.percent}%;background:${d.color}"></div></div>
       </div>`,
       )
       .join("");
@@ -284,16 +282,18 @@ export class UsagePanel {
       .join("");
 
     const barRows = toolItems
-      .map(
-        (t) => `
+      .map((t) => {
+        const pct = totalToolCalls > 0 ? Math.round((t.count / totalToolCalls) * 100) : 0;
+        return `
       <div class="bar-row">
         <div class="bar-name">${t.name}</div>
         <div class="bar-track">
           <div class="bar-fill" style="width:${(t.count / maxTool) * 100}%;background:${t.color}"></div>
         </div>
         <div class="bar-count">${t.count}</div>
-      </div>`,
-      )
+        <div class="bar-pct">${pct}%</div>
+      </div>`;
+      })
       .join("");
 
     const countCards = toolItems
@@ -325,22 +325,58 @@ export class UsagePanel {
 <title>GLM Usage</title>
 <style>
   :root {
+    /* 主色梯度 */
     --accent: #6366f1;
-    --green: #10b981;
-    --yellow: #f59e0b;
-    --red: #ef4444;
+    --accent-soft: rgba(99,102,241,.12);
+
+    /* 语义色 */
+    --ok: #10b981;
+    --warn: #f59e0b;
+    --warn-strong: #d9a441;
+    --danger: #ef4444;
+    --danger-soft: #d05d5d;
+
+    /* 层级背景 */
     --bg: var(--vscode-editor-background);
     --fg: var(--vscode-foreground);
-    --card-bg: var(--vscode-editor-inactiveSelectionBackground);
-    --panel-bg: var(--vscode-editor-selectionBackground);
+    --surface-1: var(--vscode-editor-background);
+    --surface-2: var(--vscode-editor-inactiveSelectionBackground);
+    --surface-3: var(--vscode-editor-selectionBackground);
+    /* 兼容旧名（Task 5 前的过渡） */
+    --card-bg: var(--surface-2);
+    --panel-bg: var(--surface-3);
+
+    /* 边框 / 文字弱化 */
     --border: var(--vscode-panel-border, rgba(128,128,128,.25));
     --muted: var(--vscode-descriptionForeground);
+
+    /* 圆角 */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+
+    /* 间距 */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+
+    /* 字号梯度 */
+    --text-xs: 10px;
+    --text-sm: 11px;
+    --text-base: 12px;
+    --text-md: 13px;
+    --text-lg: 16px;
+    --text-xl: 22px;
+    --text-2xl: 28px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{
     font-family:var(--vscode-font-family,sans-serif);
     color:var(--fg);background:var(--bg);
-    font-size:12px;line-height:1.5;padding:16px;
+    font-size:var(--text-base);line-height:1.5;padding:var(--space-4);
     max-height:100vh;overflow-y:auto;
     animation:fadeIn .25s ease-out;
   }
@@ -349,7 +385,8 @@ export class UsagePanel {
 
   /* 头部 */
   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-  .title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .title{font-size:var(--text-lg);font-weight:700;display:flex;align-items:center;gap:var(--space-2)}
+  .title-icon{display:inline-flex;color:var(--accent)}
   .level-badge{
     font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;
     background:var(--vscode-textBlockQuote-background);color:var(--muted);
@@ -368,19 +405,25 @@ export class UsagePanel {
 
   /* 配额摘要条 */
   .quota-bar{
-    display:flex;gap:12px;margin-bottom:14px;
-    padding:10px 14px;border-radius:10px;background:var(--card-bg);
-    border:1px solid var(--border);align-items:center;flex-wrap:wrap;
+    display:flex;gap:var(--space-4);margin-bottom:var(--space-4);
+    padding:var(--space-3) var(--space-5);border-radius:var(--radius-md);
+    background:var(--surface-2);border:1px solid var(--border);
+    border-left:3px solid var(--border);
+    align-items:center;flex-wrap:wrap;transition:border-color .2s,background .2s;
   }
-  .quota-item{display:flex;align-items:center;gap:6px;font-size:11px}
+  /* 警示态：配额接近上限 */
+  .quota-bar.is-warn{border-left-color:var(--warn-strong);background:rgba(245,158,11,.06)}
+  .quota-bar.is-danger{border-left-color:var(--danger-soft);background:rgba(239,68,68,.06)}
+  .quota-item{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm)}
   .quota-dot{width:8px;height:8px;border-radius:50%}
-  .quota-dot.token{background:#6366f1}
-  .quota-dot.weekly{background:#10b981}
-  .quota-dot.mcp{background:#f59e0b}
-  .quota-pct{font-weight:700;font-size:13px}
-  .quota-meta{color:var(--muted)}
+  .quota-dot.token{background:var(--accent)}
+  .quota-dot.weekly{background:var(--ok)}
+  .quota-dot.mcp{background:var(--warn)}
+  .quota-pct{font-weight:700;font-size:var(--text-lg)}
+  .quota-meta{color:var(--muted);font-size:var(--text-xs)}
   .offline-badge{
-    margin-left:auto;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;
+    margin-left:auto;padding:3px var(--space-3);border-radius:999px;
+    font-size:var(--text-xs);font-weight:600;
     background:rgba(245,158,11,.15);color:#d97706;
   }
 
@@ -390,13 +433,14 @@ export class UsagePanel {
     background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:16px;
     display:flex;flex-direction:column;
   }
-  .card-title{font-size:13px;font-weight:600;margin-bottom:12px}
+  .card-title{font-size:var(--text-md);font-weight:600;margin-bottom:var(--space-4);display:flex;align-items:center;gap:var(--space-2)}
+  .card-icon{display:inline-flex;color:var(--muted)}
 
   /* 环形图 */
   .chart-area{display:flex;justify-content:center;margin-bottom:14px}
-  .donut-chart{width:180px;height:180px}
+  .donut-chart{width:200px;height:200px}
   .donut-value{
-    font-size:22px;font-weight:700;fill:var(--fg);
+    font-size:var(--text-2xl);font-weight:700;fill:var(--fg);
     font-family:var(--vscode-font-family,sans-serif);
   }
   .donut-label{
@@ -405,12 +449,15 @@ export class UsagePanel {
   }
 
   /* 图例 */
-  .legend{display:flex;flex-direction:column;gap:6px}
-  .legend-item{display:grid;grid-template-columns:8px 1fr auto auto;gap:6px;align-items:center;font-size:11px}
+  .legend{display:flex;flex-direction:column;gap:var(--space-2)}
+  .legend-item{display:flex;flex-direction:column;gap:3px;font-size:var(--text-sm)}
+  .legend-head{display:flex;align-items:center;gap:var(--space-2)}
   .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-  .legend-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .legend-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .legend-value{color:var(--muted);text-align:right;white-space:nowrap}
   .legend-pct{font-weight:600;text-align:right;min-width:36px}
+  .legend-bar{height:3px;border-radius:2px;background:var(--surface-3);overflow:hidden}
+  .legend-bar-fill{height:100%;border-radius:2px}
 
   /* 工具标签 */
   .tool-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
@@ -422,20 +469,19 @@ export class UsagePanel {
   .tag-dot{width:6px;height:6px;border-radius:50%}
 
   /* 柱状图 */
-  .bar-chart{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
-  .bar-row{display:grid;grid-template-columns:64px 1fr 36px;gap:8px;align-items:center}
-  .bar-name{font-size:11px;color:var(--muted);white-space:nowrap}
-  .bar-track{height:18px;border-radius:4px;background:var(--panel-bg);overflow:hidden}
-  .bar-fill{height:100%;border-radius:4px;min-width:2px;transition:width .3s}
-  .bar-count{font-size:13px;font-weight:700;text-align:right}
+  .bar-chart{display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)}
+  .bar-row{display:grid;grid-template-columns:56px 1fr auto 40px;gap:var(--space-2);align-items:center}
+  .bar-name{font-size:var(--text-sm);color:var(--muted);white-space:nowrap}
+  .bar-track{height:var(--space-4);border-radius:var(--radius-sm);background:var(--surface-3);overflow:hidden}
+  .bar-fill{height:100%;border-radius:var(--radius-sm);min-width:2px;transition:width .3s}
+  .bar-count{font-size:var(--text-md);font-weight:700;text-align:right;white-space:nowrap}
+  .bar-pct{font-size:var(--text-xs);color:var(--muted);text-align:right}
 
   /* 计数卡片 */
-  .count-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-  .count-card{
-    text-align:center;padding:10px 6px;border-radius:8px;background:var(--panel-bg);
-  }
-  .count-num{font-size:20px;font-weight:700}
-  .count-label{font-size:10px;color:var(--muted);margin-top:2px}
+  .count-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-2)}
+  .count-card{text-align:center;padding:var(--space-2) var(--space-1);border-radius:var(--radius-sm);background:var(--surface-3)}
+  .count-num{font-size:var(--text-xl);font-weight:700}
+  .count-label{font-size:var(--text-xs);color:var(--muted);margin-top:2px}
 
   /* 页脚 */
   .footer{
@@ -444,9 +490,14 @@ export class UsagePanel {
     color:var(--muted);font-size:11px;
   }
 
-  @media(max-width:600px){
+  /* 中宽：主网格保持双列，配额条横排 */
+  @media(max-width:760px){
     .main-grid{grid-template-columns:1fr}
-    .quota-bar{flex-direction:column;align-items:flex-start;gap:6px}
+  }
+  /* 窄宽：配额条堆叠为多行 */
+  @media(max-width:480px){
+    .quota-bar{flex-direction:column;align-items:flex-start;gap:var(--space-2)}
+    .donut-chart{width:170px;height:170px}
   }
 
   /* 折线图 */
@@ -455,18 +506,20 @@ export class UsagePanel {
     padding:16px;margin-top:14px;
   }
   .trend-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-  .trend-title{font-size:13px;font-weight:600}
+  .trend-title{font-size:var(--text-md);font-weight:600;display:flex;align-items:center;gap:var(--space-2)}
   .trend-legend{display:flex;gap:12px;flex-wrap:wrap}
   .trend-legend-item{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)}
   .trend-legend-dot{width:8px;height:3px;border-radius:1px}
   .trend-svg{width:100%;height:auto;display:block}
   .trend-svg text{font-family:var(--vscode-font-family,sans-serif)}
+  .trend-grid-line{stroke:var(--border);stroke-width:.5;stroke-dasharray:2 3}
+  .trend-point{fill:var(--bg)}
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div class="title">GLM 套餐${levelText ? ` <span class="level-badge">${this.escapeHtml(levelText)}</span>` : ""}</div>
+  <div class="title"><span class="title-icon">${getIcon("quota")}</span>GLM 套餐${levelText ? ` <span class="level-badge">${escapeHtml(levelText)}</span>` : ""}</div>
   <div class="header-right">
     <div class="tabs">
       ${ranges.map((r) => `<div class="tab ${r === this.currentRange ? "active" : ""}" onclick="changeRange('${r}')">${getUsageRangeLabel(r)}</div>`).join("")}
@@ -475,38 +528,38 @@ export class UsagePanel {
   </div>
 </div>
 
-<div class="quota-bar">
+<div class="quota-bar ${dominantPercent >= 95 ? "is-danger" : dominantPercent >= 80 ? "is-warn" : ""}">
   <div class="quota-item">
     <span class="quota-dot token"></span>
-    Token <span class="quota-pct" style="color:${this.getProgressColor(tokenPercent)}">${tokenPercent}%</span>
-    <span class="quota-meta">剩余 ${tokenRemaining.toLocaleString("zh-CN")} · 重置 ${tokenResetTime}</span>
+    Token <span class="quota-pct" style="color:${getProgressColor(tokenPercent)}">${tokenPercent}%</span>
+    <span class="quota-meta" title="${summary.tokenResetAt ? getRelativeTime(summary.tokenResetAt) : ''}">剩余 ${tokenRemaining.toLocaleString("zh-CN")} · 重置 ${tokenResetTime}</span>
   </div>
   ${
     weekly
       ? `<div class="quota-item">
     <span class="quota-dot weekly"></span>
-    周额度 <span class="quota-pct" style="color:${this.getProgressColor(weeklyPercent)}">${weeklyPercent}%</span>
-    <span class="quota-meta"> 重置 ${weeklyResetTime}</span>
+    周额度 <span class="quota-pct" style="color:${getProgressColor(weeklyPercent)}">${weeklyPercent}%</span>
+    <span class="quota-meta" title="${summary.weeklyTokenResetAt ? getRelativeTime(summary.weeklyTokenResetAt) : ''}"> 重置 ${weeklyResetTime}</span>
   </div>`
       : ""
   }
   <div class="quota-item">
     <span class="quota-dot mcp"></span>
-    MCP <span class="quota-pct" style="color:${this.getProgressColor(mcpPercent)}">${mcpPercent}%</span>
-    <span class="quota-meta">剩余 ${mcpRemaining.toLocaleString("zh-CN")} · 重置 ${mcpResetTime}</span>
+    MCP <span class="quota-pct" style="color:${getProgressColor(mcpPercent)}">${mcpPercent}%</span>
+    <span class="quota-meta" title="${summary.mcpResetAt ? getRelativeTime(summary.mcpResetAt) : ''}">剩余 ${mcpRemaining.toLocaleString("zh-CN")} · 重置 ${mcpResetTime}</span>
   </div>
   ${this.isOffline ? '<span class="offline-badge">⚡ 离线缓存</span>' : ""}
 </div>
 
 <div class="main-grid">
   <div class="card">
-    <div class="card-title">模型使用占比</div>
+    <div class="card-title"><span class="card-icon">${getIcon("donut")}</span>模型使用占比</div>
     <div class="chart-area">${donutSvg}</div>
     <div class="legend">${legendItems || '<div style="color:var(--muted)">暂无模型数据</div>'}</div>
   </div>
 
   <div class="card">
-    <div class="card-title">工具使用统计</div>
+    <div class="card-title"><span class="card-icon">${getIcon("tool")}</span>工具使用统计</div>
     ${
       totalToolCalls > 0
         ? `
@@ -514,7 +567,10 @@ export class UsagePanel {
     <div class="bar-chart">${barRows}</div>
     <div class="count-grid">${countCards}</div>
     `
-        : '<div style="color:var(--muted);text-align:center;padding:24px 0">暂无工具使用数据</div>'
+        : `<div style="display:flex;flex-direction:column;align-items:center;gap:var(--space-2);color:var(--muted);text-align:center;padding:var(--space-6) 0">
+    <span style="opacity:.5;display:inline-flex">${getIcon("tool")}</span>
+    <div style="font-size:var(--text-sm)">暂无工具使用数据</div>
+  </div>`
     }
   </div>
 </div>
@@ -590,11 +646,12 @@ ${this.generateLineChartSection(summary)}
     // Y 轴刻度
     const yTicks = 4;
     let yAxisSvg = "";
+    yAxisSvg += `<text x="${padL}" y="${padT - 4}" text-anchor="start" fill="var(--muted)" font-size="9">Token</text>`;
     for (let i = 0; i <= yTicks; i++) {
       const v = (niceMax / yTicks) * i;
       const y = yScale(v);
-      yAxisSvg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--border)" stroke-width="0.5"/>`;
-      yAxisSvg += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="var(--muted)" font-size="9">${this.formatTokenCount(v)}</text>`;
+      yAxisSvg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" class="trend-grid-line"/>`;
+      yAxisSvg += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="var(--muted)" font-size="9">${formatTokenCount(v)}</text>`;
     }
 
     // X 轴标签：密集时旋转避免重叠
@@ -630,7 +687,16 @@ ${this.generateLineChartSection(summary)}
             return `${x},${y}`;
           })
           .join(" ");
-        return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`;
+        // 每个数据点：小圆点 + 原生 tooltip（日期 + 模型 + 数值）
+        const dots = m.tokensUsage
+          .map((v, i) => {
+            const x = padL + i * xStep;
+            const y = yScale(v);
+            const tip = `${xTime[i]} · ${m.modelName} · ${formatTokenCount(v)}`;
+            return `<circle cx="${x}" cy="${y}" r="2.5" fill="${color}" stroke="var(--bg)" stroke-width="1"><title>${tip}</title></circle>`;
+          })
+          .join("");
+        return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>${dots}`;
       })
       .join("\n");
 
@@ -638,7 +704,7 @@ ${this.generateLineChartSection(summary)}
     const legendItems = sortedModels
       .map((m, idx) => {
         const color = CHART_COLORS[idx % CHART_COLORS.length];
-        return `<span class="trend-legend-item"><span class="trend-legend-dot" style="background:${color}"></span>${this.escapeHtml(m.modelName)}</span>`;
+        return `<span class="trend-legend-item"><span class="trend-legend-dot" style="background:${color}"></span>${escapeHtml(m.modelName)}</span>`;
       })
       .join("");
 
@@ -650,7 +716,7 @@ ${this.generateLineChartSection(summary)}
 
     return `<div class="trend-card">
       <div class="trend-header">
-        <div class="trend-title">Token 用量趋势</div>
+        <div class="trend-title"><span class="card-icon">${getIcon("trend")}</span>Token 用量趋势</div>
         <div class="trend-legend">${legendItems}</div>
       </div>
       ${svg}
@@ -691,28 +757,6 @@ ${this.generateLineChartSection(summary)}
     return parts.length > 0
       ? parts.join(" · ")
       : `更新于 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
-  }
-
-  private getProgressColor(pct: number): string {
-    if (pct >= 95) return "#d05d5d";
-    if (pct >= 80) return "#d9a441";
-    return "#10b981";
-  }
-
-  private formatTokenCount(v: number): string {
-    if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-    return v.toString();
-  }
-
-  private escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
   }
 
   dispose(): void {
