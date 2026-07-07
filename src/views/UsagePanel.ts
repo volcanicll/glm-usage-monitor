@@ -6,6 +6,7 @@ import {
   escapeHtml,
   formatTokenCount,
   getProgressColor,
+  getRelativeTime,
 } from "./panelUtils";
 
 /**
@@ -397,19 +398,25 @@ export class UsagePanel {
 
   /* 配额摘要条 */
   .quota-bar{
-    display:flex;gap:12px;margin-bottom:14px;
-    padding:10px 14px;border-radius:10px;background:var(--card-bg);
-    border:1px solid var(--border);align-items:center;flex-wrap:wrap;
+    display:flex;gap:var(--space-4);margin-bottom:var(--space-4);
+    padding:var(--space-3) var(--space-5);border-radius:var(--radius-md);
+    background:var(--surface-2);border:1px solid var(--border);
+    border-left:3px solid var(--border);
+    align-items:center;flex-wrap:wrap;transition:border-color .2s,background .2s;
   }
-  .quota-item{display:flex;align-items:center;gap:6px;font-size:11px}
+  /* 警示态：配额接近上限 */
+  .quota-bar.is-warn{border-left-color:var(--warn-strong);background:rgba(245,158,11,.06)}
+  .quota-bar.is-danger{border-left-color:var(--danger-soft);background:rgba(239,68,68,.06)}
+  .quota-item{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm)}
   .quota-dot{width:8px;height:8px;border-radius:50%}
-  .quota-dot.token{background:#6366f1}
-  .quota-dot.weekly{background:#10b981}
-  .quota-dot.mcp{background:#f59e0b}
-  .quota-pct{font-weight:700;font-size:13px}
-  .quota-meta{color:var(--muted)}
+  .quota-dot.token{background:var(--accent)}
+  .quota-dot.weekly{background:var(--ok)}
+  .quota-dot.mcp{background:var(--warn)}
+  .quota-pct{font-weight:700;font-size:var(--text-lg)}
+  .quota-meta{color:var(--muted);font-size:var(--text-xs)}
   .offline-badge{
-    margin-left:auto;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;
+    margin-left:auto;padding:3px var(--space-3);border-radius:999px;
+    font-size:var(--text-xs);font-weight:600;
     background:rgba(245,158,11,.15);color:#d97706;
   }
 
@@ -504,25 +511,25 @@ export class UsagePanel {
   </div>
 </div>
 
-<div class="quota-bar">
+<div class="quota-bar ${dominantPercent >= 95 ? "is-danger" : dominantPercent >= 80 ? "is-warn" : ""}">
   <div class="quota-item">
     <span class="quota-dot token"></span>
     Token <span class="quota-pct" style="color:${getProgressColor(tokenPercent)}">${tokenPercent}%</span>
-    <span class="quota-meta">剩余 ${tokenRemaining.toLocaleString("zh-CN")} · 重置 ${tokenResetTime}</span>
+    <span class="quota-meta" title="${summary.tokenResetAt ? getRelativeTime(summary.tokenResetAt) : ''}">剩余 ${tokenRemaining.toLocaleString("zh-CN")} · 重置 ${tokenResetTime}</span>
   </div>
   ${
     weekly
       ? `<div class="quota-item">
     <span class="quota-dot weekly"></span>
     周额度 <span class="quota-pct" style="color:${getProgressColor(weeklyPercent)}">${weeklyPercent}%</span>
-    <span class="quota-meta"> 重置 ${weeklyResetTime}</span>
+    <span class="quota-meta" title="${summary.weeklyTokenResetAt ? getRelativeTime(summary.weeklyTokenResetAt) : ''}"> 重置 ${weeklyResetTime}</span>
   </div>`
       : ""
   }
   <div class="quota-item">
     <span class="quota-dot mcp"></span>
     MCP <span class="quota-pct" style="color:${getProgressColor(mcpPercent)}">${mcpPercent}%</span>
-    <span class="quota-meta">剩余 ${mcpRemaining.toLocaleString("zh-CN")} · 重置 ${mcpResetTime}</span>
+    <span class="quota-meta" title="${summary.mcpResetAt ? getRelativeTime(summary.mcpResetAt) : ''}">剩余 ${mcpRemaining.toLocaleString("zh-CN")} · 重置 ${mcpResetTime}</span>
   </div>
   ${this.isOffline ? '<span class="offline-badge">⚡ 离线缓存</span>' : ""}
 </div>
