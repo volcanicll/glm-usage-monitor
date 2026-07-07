@@ -318,16 +318,52 @@ export class UsagePanel {
 <title>GLM Usage</title>
 <style>
   :root {
+    /* 主色梯度 */
     --accent: #6366f1;
-    --green: #10b981;
-    --yellow: #f59e0b;
-    --red: #ef4444;
+    --accent-soft: rgba(99,102,241,.12);
+
+    /* 语义色 */
+    --ok: #10b981;
+    --warn: #f59e0b;
+    --warn-strong: #d9a441;
+    --danger: #ef4444;
+    --danger-soft: #d05d5d;
+
+    /* 层级背景 */
     --bg: var(--vscode-editor-background);
     --fg: var(--vscode-foreground);
-    --card-bg: var(--vscode-editor-inactiveSelectionBackground);
-    --panel-bg: var(--vscode-editor-selectionBackground);
+    --surface-1: var(--vscode-editor-background);
+    --surface-2: var(--vscode-editor-inactiveSelectionBackground);
+    --surface-3: var(--vscode-editor-selectionBackground);
+    /* 兼容旧名（Task 5 前的过渡） */
+    --card-bg: var(--surface-2);
+    --panel-bg: var(--surface-3);
+
+    /* 边框 / 文字弱化 */
     --border: var(--vscode-panel-border, rgba(128,128,128,.25));
     --muted: var(--vscode-descriptionForeground);
+
+    /* 圆角 */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+
+    /* 间距 */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+
+    /* 字号梯度 */
+    --text-xs: 10px;
+    --text-sm: 11px;
+    --text-base: 12px;
+    --text-md: 13px;
+    --text-lg: 16px;
+    --text-xl: 22px;
+    --text-2xl: 28px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{
