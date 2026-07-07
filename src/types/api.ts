@@ -87,10 +87,14 @@ export interface CombinedUsageData {
 export interface QuotaSummary {
   tokenUsage: { percentage: number; used: number; total: number };
   mcpUsage: { percentage: number; used: number; total: number };
+  /** 周级 Token 额度（TOKENS_LIMIT 且 unit=6） */
+  weeklyTokenUsage?: { percentage: number; used: number; total: number };
   /** Token reset time (hourly, display as 时分) */
   tokenResetAt?: string;
   /** MCP reset time (monthly, display as 年月日时分) */
   mcpResetAt?: string;
+  /** 周级 Token 额度重置时间（display as 月日时分） */
+  weeklyTokenResetAt?: string;
   /** @deprecated Use tokenResetAt and mcpResetAt instead */
   monthlyResetAt: string;
   /** Token数 consumed in the query time period */

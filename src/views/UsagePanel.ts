@@ -196,6 +196,22 @@ export class UsagePanel {
         })
       : "--";
 
+    // ── 周级 Token 额度 ──
+    const weekly = summary.weeklyTokenUsage;
+    const weeklyPercent = weekly ? Math.round(weekly.percentage) : 0;
+    const weeklyRemaining = weekly
+      ? Math.max(0, weekly.total - weekly.used)
+      : 0;
+    const weeklyResetTime = summary.weeklyTokenResetAt
+      ? new Date(summary.weeklyTokenResetAt).toLocaleString("zh-CN", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+      : "--";
+
     // ── 模型数据 ──
     const modelList = [
       ...(summary.modelUsageDetails?.totalUsage?.modelSummaryList ?? []),
@@ -359,6 +375,7 @@ export class UsagePanel {
   .quota-item{display:flex;align-items:center;gap:6px;font-size:11px}
   .quota-dot{width:8px;height:8px;border-radius:50%}
   .quota-dot.token{background:#6366f1}
+  .quota-dot.weekly{background:#10b981}
   .quota-dot.mcp{background:#f59e0b}
   .quota-pct{font-weight:700;font-size:13px}
   .quota-meta{color:var(--muted)}
@@ -464,6 +481,15 @@ export class UsagePanel {
     Token <span class="quota-pct" style="color:${this.getProgressColor(tokenPercent)}">${tokenPercent}%</span>
     <span class="quota-meta">剩余 ${tokenRemaining.toLocaleString("zh-CN")} · 重置 ${tokenResetTime}</span>
   </div>
+  ${
+    weekly
+      ? `<div class="quota-item">
+    <span class="quota-dot weekly"></span>
+    周额度 <span class="quota-pct" style="color:${this.getProgressColor(weeklyPercent)}">${weeklyPercent}%</span>
+    <span class="quota-meta"> 重置 ${weeklyResetTime}</span>
+  </div>`
+      : ""
+  }
   <div class="quota-item">
     <span class="quota-dot mcp"></span>
     MCP <span class="quota-pct" style="color:${this.getProgressColor(mcpPercent)}">${mcpPercent}%</span>
@@ -481,11 +507,15 @@ export class UsagePanel {
 
   <div class="card">
     <div class="card-title">工具使用统计</div>
-    ${totalToolCalls > 0 ? `
+    ${
+      totalToolCalls > 0
+        ? `
     <div class="tool-tags">${toolTags}</div>
     <div class="bar-chart">${barRows}</div>
     <div class="count-grid">${countCards}</div>
-    ` : '<div style="color:var(--muted);text-align:center;padding:24px 0">暂无工具使用数据</div>'}
+    `
+        : '<div style="color:var(--muted);text-align:center;padding:24px 0">暂无工具使用数据</div>'
+    }
   </div>
 </div>
 

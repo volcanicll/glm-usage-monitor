@@ -238,19 +238,33 @@ export class StatusBarManager {
   private getTooltip(): vscode.MarkdownString {
     if (this.isOffline) {
       if (this.currentSummary) {
-        const { tokenUsage, mcpUsage, tokenResetAt, mcpResetAt } =
-          this.currentSummary;
+        const {
+          tokenUsage,
+          mcpUsage,
+          tokenResetAt,
+          mcpResetAt,
+          weeklyTokenUsage,
+          weeklyTokenResetAt,
+        } = this.currentSummary;
         const tokenResetTime = tokenResetAt
           ? new Date(tokenResetAt).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
           : "--";
         const mcpResetTime = mcpResetAt
           ? new Date(mcpResetAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
           : "--";
+        const weeklyResetTime = weeklyTokenResetAt
+          ? new Date(weeklyTokenResetAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+          : "--";
         return this.createTooltipMarkdown(
           "GLM Usage",
           "离线缓存",
           [
             `Token **${tokenUsage.percentage.toFixed(1)}%** · 重置 ${tokenResetTime}`,
+            ...(weeklyTokenUsage
+              ? [
+                  `周额度 **${weeklyTokenUsage.percentage.toFixed(1)}%** · 重置 ${weeklyResetTime}`,
+                ]
+              : []),
             `MCP **${mcpUsage.percentage.toFixed(1)}%** · 重置 ${mcpResetTime}`,
             "",
             `范围：${getUsageRangeLabel(this.currentRange)}`,
@@ -274,12 +288,22 @@ export class StatusBarManager {
       return this.createTooltipMarkdown("GLM Usage", "未配置凭证", ["点击配置"]);
     }
 
-    const { tokenUsage, mcpUsage, tokenResetAt, mcpResetAt } = this.currentSummary;
+    const {
+      tokenUsage,
+      mcpUsage,
+      tokenResetAt,
+      mcpResetAt,
+      weeklyTokenUsage,
+      weeklyTokenResetAt,
+    } = this.currentSummary;
     const tokenResetTime = tokenResetAt
       ? new Date(tokenResetAt).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
       : "--";
     const mcpResetTime = mcpResetAt
       ? new Date(mcpResetAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+      : "--";
+    const weeklyResetTime = weeklyTokenResetAt
+      ? new Date(weeklyTokenResetAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
       : "--";
 
     return this.createTooltipMarkdown(
@@ -287,6 +311,11 @@ export class StatusBarManager {
       this.getHealthLabel(this.getDominantPercentage()),
       [
         `Token **${tokenUsage.percentage.toFixed(1)}%** · 重置 ${tokenResetTime}`,
+        ...(weeklyTokenUsage
+          ? [
+              `周额度 **${weeklyTokenUsage.percentage.toFixed(1)}%** · 重置 ${weeklyResetTime}`,
+            ]
+          : []),
         `MCP **${mcpUsage.percentage.toFixed(1)}%** · 重置 ${mcpResetTime}`,
         "",
         `范围：${getUsageRangeLabel(this.currentRange)}`,

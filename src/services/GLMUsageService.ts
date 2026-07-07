@@ -581,7 +581,19 @@ export class GLMUsageService {
     }
 
     const limits = actualResponse.limits;
-    const tokenLimit = limits.find((l) => l.type === "TOKENS_LIMIT");
+    // TOKENS_LIMIT 可能存在多条：
+    //  - unit=3：小时级（百万 M tokens）
+    //  - unit=6：周级额度
+    const tokensLimits = limits.filter((l) => l.type === "TOKENS_LIMIT");
+    // unit=3 为小时级；如未标注 unit 则默认取第一条作为小时级
+    const tokenLimit =
+      tokensLimits.find((l) => this.toNumber(l.unit) === 3) ??
+      tokensLimits.find((l) => this.toNumber(l.unit) !== 6) ??
+      tokensLimits[0];
+    // unit=6 为周级额度
+    const weeklyTokenLimit = tokensLimits.find(
+      (l) => this.toNumber(l.unit) === 6,
+    );
     const timeLimit = limits.find((l) => l.type === "TIME_LIMIT");
 
     // ========== TOKENS_LIMIT 解析 ==========
@@ -591,6 +603,24 @@ export class GLMUsageService {
 
     if (tokenLimit) {
       tokenPercentage = this.toNumber(tokenLimit.percentage);
+    }
+
+    // ========== 周级 TOKENS_LIMIT 解析 ==========
+    // unit=6 表示周维度额度，number 为总额度（M tokens），percentage 为使用百分比
+    let weeklyTokenPercentage = 0;
+    let weeklyTokenUsed = 0;
+    let weeklyTokenTotal = 0;
+
+    if (weeklyTokenLimit) {
+      weeklyTokenPercentage = this.toNumber(weeklyTokenLimit.percentage);
+      // number 字段表示总额度，单位为百万(M) tokens
+      const numberValue = this.toNumber(weeklyTokenLimit.number);
+      weeklyTokenTotal = numberValue;
+      // 由总额度与百分比推算已使用量（保持单位一致：M tokens）
+      weeklyTokenUsed =
+        numberValue > 0
+          ? (numberValue * weeklyTokenPercentage) / 100
+          : weeklyTokenPercentage;
     }
 
     // ========== TIME_LIMIT (MCP) 解析 ==========
@@ -612,6 +642,9 @@ export class GLMUsageService {
     // 提取重置时间：Token 是小时级重置，MCP 是月度重置
     const tokenResetAt = this.extractTokenResetTime(tokenLimit);
     const mcpResetAt = this.extractMcpResetTime(timeLimit);
+    const weeklyTokenResetAt = this.extractResetTimeFromLimit(
+      weeklyTokenLimit,
+    );
 
     return {
       tokenUsage: {
@@ -624,6 +657,16 @@ export class GLMUsageService {
         used: Math.max(0, mcpUsed),
         total: Math.max(0, mcpTotal),
       },
+      ...(weeklyTokenLimit
+        ? {
+            weeklyTokenUsage: {
+              percentage: Math.max(0, Math.min(100, weeklyTokenPercentage)),
+              used: Math.max(0, weeklyTokenUsed),
+              total: Math.max(0, weeklyTokenTotal),
+            },
+            weeklyTokenResetAt,
+          }
+        : {}),
       tokenResetAt,
       mcpResetAt,
       monthlyResetAt: mcpResetAt,
