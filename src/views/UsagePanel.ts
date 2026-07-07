@@ -282,16 +282,18 @@ export class UsagePanel {
       .join("");
 
     const barRows = toolItems
-      .map(
-        (t) => `
+      .map((t) => {
+        const pct = totalToolCalls > 0 ? Math.round((t.count / totalToolCalls) * 100) : 0;
+        return `
       <div class="bar-row">
         <div class="bar-name">${t.name}</div>
         <div class="bar-track">
           <div class="bar-fill" style="width:${(t.count / maxTool) * 100}%;background:${t.color}"></div>
         </div>
         <div class="bar-count">${t.count}</div>
-      </div>`,
-      )
+        <div class="bar-pct">${pct}%</div>
+      </div>`;
+      })
       .join("");
 
     const countCards = toolItems
@@ -466,20 +468,19 @@ export class UsagePanel {
   .tag-dot{width:6px;height:6px;border-radius:50%}
 
   /* 柱状图 */
-  .bar-chart{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
-  .bar-row{display:grid;grid-template-columns:64px 1fr 36px;gap:8px;align-items:center}
-  .bar-name{font-size:11px;color:var(--muted);white-space:nowrap}
-  .bar-track{height:18px;border-radius:4px;background:var(--panel-bg);overflow:hidden}
-  .bar-fill{height:100%;border-radius:4px;min-width:2px;transition:width .3s}
-  .bar-count{font-size:13px;font-weight:700;text-align:right}
+  .bar-chart{display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)}
+  .bar-row{display:grid;grid-template-columns:56px 1fr auto 40px;gap:var(--space-2);align-items:center}
+  .bar-name{font-size:var(--text-sm);color:var(--muted);white-space:nowrap}
+  .bar-track{height:var(--space-4);border-radius:var(--radius-sm);background:var(--surface-3);overflow:hidden}
+  .bar-fill{height:100%;border-radius:var(--radius-sm);min-width:2px;transition:width .3s}
+  .bar-count{font-size:var(--text-md);font-weight:700;text-align:right;white-space:nowrap}
+  .bar-pct{font-size:var(--text-xs);color:var(--muted);text-align:right}
 
   /* 计数卡片 */
-  .count-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-  .count-card{
-    text-align:center;padding:10px 6px;border-radius:8px;background:var(--panel-bg);
-  }
-  .count-num{font-size:20px;font-weight:700}
-  .count-label{font-size:10px;color:var(--muted);margin-top:2px}
+  .count-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-2)}
+  .count-card{text-align:center;padding:var(--space-2) var(--space-1);border-radius:var(--radius-sm);background:var(--surface-3)}
+  .count-num{font-size:var(--text-xl);font-weight:700}
+  .count-label{font-size:var(--text-xs);color:var(--muted);margin-top:2px}
 
   /* 页脚 */
   .footer{
@@ -550,7 +551,7 @@ export class UsagePanel {
   </div>
 
   <div class="card">
-    <div class="card-title">工具使用统计</div>
+    <div class="card-title"><span class="card-icon">${getIcon("tool")}</span>工具使用统计</div>
     ${
       totalToolCalls > 0
         ? `
@@ -558,7 +559,10 @@ export class UsagePanel {
     <div class="bar-chart">${barRows}</div>
     <div class="count-grid">${countCards}</div>
     `
-        : '<div style="color:var(--muted);text-align:center;padding:24px 0">暂无工具使用数据</div>'
+        : `<div style="display:flex;flex-direction:column;align-items:center;gap:var(--space-2);color:var(--muted);text-align:center;padding:var(--space-6) 0">
+    <span style="opacity:.5;display:inline-flex">${getIcon("tool")}</span>
+    <div style="font-size:var(--text-sm)">暂无工具使用数据</div>
+  </div>`
     }
   </div>
 </div>
