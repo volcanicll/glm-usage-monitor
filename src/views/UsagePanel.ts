@@ -376,7 +376,7 @@ export class UsagePanel {
   body{
     font-family:var(--vscode-font-family,sans-serif);
     color:var(--fg);background:var(--bg);
-    font-size:12px;line-height:1.5;padding:16px;
+    font-size:var(--text-base);line-height:1.5;padding:var(--space-4);
     max-height:100vh;overflow-y:auto;
     animation:fadeIn .25s ease-out;
   }
@@ -385,7 +385,8 @@ export class UsagePanel {
 
   /* 头部 */
   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-  .title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .title{font-size:var(--text-lg);font-weight:700;display:flex;align-items:center;gap:var(--space-2)}
+  .title-icon{display:inline-flex;color:var(--accent)}
   .level-badge{
     font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;
     background:var(--vscode-textBlockQuote-background);color:var(--muted);
@@ -489,9 +490,14 @@ export class UsagePanel {
     color:var(--muted);font-size:11px;
   }
 
-  @media(max-width:600px){
+  /* 中宽：主网格保持双列，配额条横排 */
+  @media(max-width:760px){
     .main-grid{grid-template-columns:1fr}
-    .quota-bar{flex-direction:column;align-items:flex-start;gap:6px}
+  }
+  /* 窄宽：配额条堆叠为多行 */
+  @media(max-width:480px){
+    .quota-bar{flex-direction:column;align-items:flex-start;gap:var(--space-2)}
+    .donut-chart{width:170px;height:170px}
   }
 
   /* 折线图 */
@@ -513,7 +519,7 @@ export class UsagePanel {
 <body>
 
 <div class="header">
-  <div class="title">GLM 套餐${levelText ? ` <span class="level-badge">${escapeHtml(levelText)}</span>` : ""}</div>
+  <div class="title"><span class="title-icon">${getIcon("quota")}</span>GLM 套餐${levelText ? ` <span class="level-badge">${escapeHtml(levelText)}</span>` : ""}</div>
   <div class="header-right">
     <div class="tabs">
       ${ranges.map((r) => `<div class="tab ${r === this.currentRange ? "active" : ""}" onclick="changeRange('${r}')">${getUsageRangeLabel(r)}</div>`).join("")}
